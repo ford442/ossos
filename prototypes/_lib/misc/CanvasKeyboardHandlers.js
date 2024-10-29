@@ -1,13 +1,17 @@
-export default class CanvasKeyboardHandlers{
+export default class CanvasKeyboardHandlers {
     // #region MAIN
     keys       = new Map(); // Keep track of which keys are currently being pressed out
+    _isActive  = false;
     _canvas    = null;
     _isFocused = false;
+    _needFocus = false;
     onKeyDown  = null;
     onKeyUp    = null;
 
-    constructor( canvas ){
-        this._canvas = canvas;
+    constructor( canvas, needFocus=true ){
+        this._canvas    = canvas;
+        this._needFocus = needFocus;
+        this._isFocused = !needFocus;
         return this;
     }
     // #endregion
@@ -24,34 +28,34 @@ export default class CanvasKeyboardHandlers{
         // Add up each axis, so if the user holds opposite buttons at the same time
         // the operation will cancel out the movement.
         return [
-            (this.keys.get('a') ? -1 : 0) + (this.keys.get('d') ? 1 : 0),
-            (this.keys.get('s') ? -1 : 0) + (this.keys.get('w') ? 1 : 0),
-            (this.keys.get('q') ? -1 : 0) + (this.keys.get('e') ? 1 : 0),
+            ( this.keys.get( 'a' ) ? -1 : 0 ) + ( this.keys.get( 'd' ) ? 1 : 0 ),
+            ( this.keys.get( 's' ) ? -1 : 0 ) + ( this.keys.get( 'w' ) ? 1 : 0 ),
+            ( this.keys.get( 'q' ) ? -1 : 0 ) + ( this.keys.get( 'e' ) ? 1 : 0 ),
         ];
     }
 
     // Return "Joystick" data using the keyboard arrow keys. [ X, Y ]
     getArrowAxes(){
         return [
-            (this.keys.get('ArrowLeft')  ? -1 : 0) +
-            (this.keys.get('ArrowRight') ?  1 : 0),
-            (this.keys.get('ArrowDown')  ? -1 : 0) +
-            (this.keys.get('ArrowUp')    ?  1 : 0),
+            ( this.keys.get( 'ArrowLeft' )  ? -1 : 0 ) +
+            ( this.keys.get( 'ArrowRight' ) ?  1 : 0 ),
+            ( this.keys.get( 'ArrowDown' )  ? -1 : 0 ) +
+            ( this.keys.get( 'ArrowUp' )    ?  1 : 0 ),
         ];
     }
     // #endregion
 
     // #region EVENT HANDLERS
-    _onPointerDown = e => { this._isFocused = ( e.target === this._canvas ); };
+    _onPointerDown = e=>{ this._isFocused = ( e.target === this._canvas ); };
 
-    _onKeyDown = e => {
-        if (this._isFocused) {
+    _onKeyDown = e=>{
+        if ( this._isFocused ){
             this.keys.set( e.key, true );
             if( this.onKeyDown ) this.onKeyDown( e, this );
         }
     };
 
-    _onKeyUp = e => {
+    _onKeyUp = e=>{
         if( this._isFocused ){
             this.keys.set( e.key, false );
             if( this.onKeyUp ) this.onKeyUp( e, this );
@@ -61,18 +65,30 @@ export default class CanvasKeyboardHandlers{
 
     // #region CONTROL LISTENERS
     enable(){
-        window.addEventListener( 'pointerdown', this._onPointerDown, true );
-        window.addEventListener( 'keydown',     this._onKeyDown, true );
-        window.addEventListener( 'keyup',       this._onKeyUp, true );
-        this._isFocused = false;
+        if( !this._isActive ){
+            window.addEventListener( 'keydown', this._onKeyDown, true );
+            window.addEventListener( 'keyup',   this._onKeyUp, true );
+            this._isActive  = true;
+
+            if( this._needFocus ){
+                window.addEventListener( 'pointerdown', this._onPointerDown, true );
+                this._isFocused = false;
+            }
+        }
         return this;
     }
 
     disable(){
-        window.removeEventListener( 'pointerdown', this._onPointerDown, true );
-        window.removeEventListener( 'keydown',     this._onKeyDown, true );
-        window.removeEventListener( 'keyup',       this._onKeyUp, true );
-        this._isFocused = false;
+        if( this._isActive ){
+            window.removeEventListener( 'keydown',  this._onKeyDown, true );
+            window.removeEventListener( 'keyup',    this._onKeyUp, true );
+            this._isActive  = false;
+
+            if( this._needFocus ){
+                window.removeEventListener( 'pointerdown', this._onPointerDown, true );
+                this._isFocused = false;
+            }
+        }
         return this;
     }
     // #endregion

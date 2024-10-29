@@ -1,0 +1,44 @@
+// https://github.com/keijiro/CharacterRigTest - Procedural Walk
+// https://github.com/gonnavis/annihilate - Mini game with a working character controller with animations.
+// https://sketches.isaacmason.com/sketch/recast-navigation/character-controller
+// https://github.com/ErdongChen-Andrew/CharacterControl Good Controller with Cam
+    // https://x.com/AndrewChenE/status/1702085087599460445?s=20
+
+/*
+- Know the stride, the distance of a single complete step.
+    Stride can be the distance done per cycle, like how long & distance
+    a foot takes
+- How Many steps per second
+- Know the velocity, v = dir * speed
+- Compute char pos based on velocity & elapsed time
+    newPos = curPos + vel * dt
+- Foot placement, LeftFoot = newPos + offsetFromCenter
+    ffsets can be based on char's width & the animation frame
+- Instead of modify current rotation, Keep rotation internal
+    - This way we can always know the current state of rotation to predict
+    when the next marker goes
+- May need to hold onto each frame's input to predict the overall
+
+- Can use easing to scale speed, time itself can be incremented
+    - So each frame we move T by a step till we reach 1 and 0
+    - At each change of T, we can use easing to compute current speed between zero & max
+    - This linear control of T controls the overall curve of the current speed without
+    dealing with acceleration. With curves we can easily define how fast something speeds up or down.
+*/
+
+// Linear Interpolation
+// new_velocity = current_velocity + (target_velocity - current_velocity) * delta_time * acceleration_factor
+
+// Smooth Damp
+// currentVelocity = Vector3.SmoothDamp(currentVelocity, targetVelocity, ref currentVelocity, smoothTime);
+
+// Quadratic or Cubic Ease Function
+// t = current_time / total_time
+// eased_t = 1 - (1 - t) ** 3  # Cubic ease-out
+// new_velocity = start_velocity + (end_velocity - start_velocity) * eased_t
+
+// exponential decay can create smooth slowing
+// current_velocity *= decay_factor ** delta_time
+
+// Damping
+// current_velocity *= damping_factor  # 0 < damping_factor < 1

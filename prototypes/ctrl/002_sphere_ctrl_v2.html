@@ -1,0 +1,274 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import SphereMat                from '../_lib/shader/SphereMat.js';
+import CanvasKeyboardHandlers   from '../_lib/misc/CanvasKeyboardHandlers.js';
+import { Vec3, Quat }           from '../../src/index';
+// #endregion
+
+// #region MAIN
+let Debug;
+let App = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 45, 20, 10, [ 0, 0.8, 0 ] );
+    Debug   = await useVisualDebug( App );
+    Ref.kb  = new CanvasKeyboardHandlers( App.renderer.domElement, false ).enable();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.sphere = new THREE.Mesh( new THREE.SphereGeometry( 1, 32, 16 ), SphereMat() );
+    Ref.sphere.position.y = 1.0;
+    App.scene.add( Ref.sphere );
+    
+    Ref.baller = new Baller( Ref.sphere );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+    // App.renderLoop();
+});
+
+function onPreRender( dt, et ){
+    const arrows = Ref.kb.getArrowAxes();
+    Debug.reset();
+    Ref.baller.update( dt, arrows );
+}
+// #endregion
+
+// #region HELPERS
+const TAO = Math.PI * 2;
+
+function wrapPI( v ){
+    const vv = v % ( Math.PI * 2 );
+    return ( Math.abs(vv) <= Math.PI )? vv : vv + ( Math.PI * 2 ) * -Math.sign(vv);
+}
+
+function wrapTAO( v ){
+    const vv = v % ( Math.PI * 2 );
+    return ( vv >= 0 )? vv : vv + ( Math.PI * 2 );
+}
+
+function clampN1( v ){ return Math.max( -1, Math.min( 1, v ) ); }
+
+function lerp( a, b, t ){ return a * (1-t) + b * t; }
+function sigmoid( t, k=0 ){ // Over 0, Eases in the middle, under eases in-out
+    // this uses the -1 to 1 value of sigmoid which allows to create easing at 
+    // start and finish. Can pass in range 0:1 and it'll return that range.
+    // Closer to 1 is slower to start
+    // Zero is linear
+    // Closer to -1 is faster to start
+    // https://dhemery.github.io/DHE-Modules/technical/sigmoid/
+    // https://www.desmos.com/calculator/q6ukniiqwn
+    return ( t - k*t ) / ( k - 2*k*Math.abs(t) + 1 );
+}
+// #endregion
+
+// https://www.youtube.com/watch?v=Ul0Gilv5wvY&list=PLCUClXmi3aSDDWjM54xVszesDTcIiHHo5
+
+// cLength = PI * ( 2 * Radius )                     // Complete distance around the circle
+// rad = TAO * ( Distance / cLength )                // Speed/Movement to sphere arc rotation
+// ArcLength = ( Rad / TAO ) * ( 2 * PI * RADIUS )   // Length of a specific arc
+class Baller{
+    // #region MAIN
+    radius      = 1;
+    arcLen      = Math.PI * this.radius * 2; // C = Pi * 2R;
+
+    turnInc     = 90 * Math.PI / 180;   // Turn angle per second
+    turnRad     = 0;                    // Current Y Rotation in radians
+    
+    moveK       = -0.2;         // Curve Option of sigmod
+    moveInc     = 0.5;          // T Increment Per Second
+    moveFwdMax  = 5.0;          // Max speed going forward per second
+    moveRevMax  = -3.0;         // Max speed going reverse per second
+    
+    moveT       = 0;            // Current T value
+    moveSpeed   = 0;            // Current speed value
+    moveSpin    = 0;            // Current rotation as Radians
+    constructor( mesh ){
+        this.mesh = mesh;
+        // console.log( 'arcLen', this.arcLen, this.arcLen * 0.5 );
+    }
+    // #endregion
+
+    // #region MOVEMENT
+    update( dt, dir ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Run sim
+        this.turnRad    = this.nextTurning( dir[0], this.turnRad, dt );
+        this.moveT      = this.nextMomentum( dir[1], this.moveT, dt );
+        this.moveSpeed  = this.nextSpeed( this.moveT, dt ); // full speed per second
+        this.moveSpin   = this.nextSpin( this.moveSpeed, this.moveSpin, dt );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Next Position from sim
+        const qTurn     = new Quat().fromAxisAngle( [0,1,0], this.turnRad );
+        const nextPos   = this.nextPosition( 
+            this.mesh.position.toArray(), qTurn, this.moveSpeed * dt );
+        
+        this.mesh.position.fromArray( nextPos );
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Next spin from sim
+        const qSpin     = new Quat().fromAxisAngle( [1,0,0], this.moveSpin );
+        const nextRot   = new Quat().fromMul( qTurn, qSpin );
+        this.mesh.quaternion.fromArray( nextRot );
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.debug();
+
+        const traj = this.computeTrajectory( dt, dir );
+        this.predictSteps( traj );
+
+        return this;
+    }
+
+    // inp = -1,0,1 of the User Turn Input
+    nextTurning( inp, prev, dt ){
+        return ( inp !== 0 )
+            ? wrapPI( prev + -inp * this.turnInc * dt )
+            : prev;
+    }
+
+    // inp = -1,0,1 of the User Forward/Reverse Input
+    nextMomentum( inp, prev, dt ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        const next = ( inp !== 0 )
+            // Acell
+            ? clampN1( prev + this.moveInc * dt * Math.sign( inp ) )
+            // Auto Decel
+            : Math.max( 0, ( Math.abs( prev ) - this.moveInc * dt ) ) * Math.sign( prev );
+
+        return next;
+    }
+    
+    // Compute the speed from T
+    nextSpeed( t, dt ){
+        const curvT = sigmoid( Math.abs( t ), this.moveK );
+        const speed = ( t > 0 )
+            ? lerp( 0, this.moveFwdMax, curvT )     // Forward Velocity
+            : lerp( 0, this.moveRevMax, curvT );    // Reverse Velocity
+
+        return speed;
+    }
+
+    // Compute the next ball spin radians
+    nextSpin( speed, prev, dt ){
+        const vel = speed * dt;
+        const rad = ( Math.PI * 2 ) * ( vel / this.arcLen ); // Speed to sphere arc rotation
+        return wrapTAO( prev + rad );
+    }
+
+    // Compute next delta position
+    nextPosition( prevPos, turnRot, dtVel, next=new Vec3() ){
+        return next 
+            .fromQuat( turnRot, Vec3.FORWARD )  // Orientation Direction
+            .scale( dtVel )                     // Scale direction with delta velocity
+            .add( prevPos );                    // Add to previous step
+    }
+    // #endregion
+
+    // #region PREDICTIONS
+
+    computeTrajectory( dt, dir, sec=2 ){
+        if( this.moveT === 0 ) return;
+
+        dt = 1/60; // Using a static Delta time makes the data less flickery
+
+        const steps     = sec / dt;
+        const qTurn     = new Quat();
+        const cpos      = new Vec3( this.mesh.position.toArray() );
+
+        let turnRad     = this.turnRad;
+        let moveT       = this.moveT;
+        let moveSpeed   = this.moveSpeed;
+        let moveSpin    = this.moveSpin;
+
+        let maxTime     = 0;
+        let maxDist     = 0;
+        let items       = [];
+
+        for( let i=0; i < steps; i++ ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Run movement sim
+            turnRad     = this.nextTurning( dir[0], turnRad, dt );
+            moveT       = this.nextMomentum( dir[1], moveT, dt );
+            moveSpeed   = this.nextSpeed( moveT, dt );
+            moveSpin    = this.nextSpin( moveSpeed, moveSpin, dt );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Next Position
+            qTurn.fromAxisAngle( [0,1,0], turnRad );
+            const npos = this.nextPosition( cpos, qTurn, moveSpeed * dt );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Timing, Distance and Trajectory
+            maxTime    += dt;
+            maxDist    += Vec3.dist( cpos, npos );
+            items.push({
+                time    : maxTime,
+                dist    : maxDist,
+                pos     : npos,
+                spin    : moveSpin,
+            });
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Setup next iteration
+            cpos.copy( npos );
+        }        
+
+        const rtn = { 
+            maxTime, 
+            maxDist, 
+            items, 
+            initPos     : this.mesh.position.toArray(),
+            initSpin    : this.moveSpin,
+        };
+
+        return rtn;
+    }
+
+    predictSteps( traj ){
+        if( !traj ) return;
+
+        let foot = -1;
+        let ppos = new Vec3( traj.initPos );
+
+        let cnt = 0;
+
+        for( let i of traj.items ){
+            const spin = i.spin % Math.PI;
+            const alt  = Math.floor( i.spin / Math.PI );
+
+            if( spin < 0.1 && foot !== alt ){
+                foot = alt;
+                Debug.pnt.add( i.pos, (foot === 0)? 0x00ff00 : 0xff0000, 3 );
+                Debug.ln.add( ppos, i.pos, 0x707070 );
+                ppos.copy( i.pos );
+
+                cnt++;
+            }
+        }
+
+        // console.log( 'steps', cnt );     
+    }
+
+    // #endregion
+
+    // #region DEBUGGING
+    debug(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // See Direction
+        const offset    = [0,-1.1,0];
+        const o         = new Vec3( this.mesh.position.toArray() ).add( offset );
+        const q         = new Quat().fromAxisAngle( [0,1,0], this.turnRad );
+        const v         = new Vec3().fromQuat( q, Vec3.FORWARD ).scale( 2 ).add( o );
+        Debug.ln.add( o, v, 0x00ff00 );
+    }
+    // #endregion
+}
+
+</script></body></html>

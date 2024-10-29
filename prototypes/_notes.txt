@@ -5,6 +5,10 @@ ROPES
 https://github.com/Ali10555/OptimizedRopesAndCables
 
 
+CHARACTER CONTROLLER 3JS + RAPIER
+https://www.youtube.com/watch?v=ipW-DUyPYlk
+
+
 GOOD EXAMPLE OF CCD WITH CONSTRAINTS
 https://zalo.github.io/blog/inverse-kinematics/
 https://zalo.github.io/blog/constraints/
@@ -42,3 +46,17 @@ https://pastebin.com/ZV5FvMg6
 
 https://zalo.github.io/blog/inverse-kinematics/ THIS IS AWESOME, Quaternions but with Constraints
 https://github.com/zalo/zalo.github.io/blob/master/assets/js/IK/IKExample.js
+
+Maya BSpline IK
+https://x.com/cal4hike/status/1830678552972591342
+https://github.com/gaki131/maya_bifrost
+
+
+ANIMATOR 
+https://github.com/BeardScript/RogueAnimator
+https://x.com/BeardScript/status/1821940442771894746
+
+
+CHARACTER CONTROLLER
+https://github.com/BeardScript/RogueRapier/blob/master/Assets/rogue_packages/RogueEngine/rogue-rapier/Components/Controllers/RapierThirdPersonController.re.ts
+https://x.com/BeardScript/status/1821940442771894746

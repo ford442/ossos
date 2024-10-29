@@ -1,0 +1,173 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import SphereMat                from '../_lib/shader/SphereMat.js';
+import CanvasKeyboardHandlers   from '../_lib/misc/CanvasKeyboardHandlers.js';
+import { Vec3, Quat }           from '../../src/index';
+// #endregion
+
+
+// #region MAIN
+let Debug;
+let App = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 0, 20, 10, [ 0, 0.8, 0 ] );
+    Debug   = await useVisualDebug( App );
+    Ref.kb  = new CanvasKeyboardHandlers( App.renderer.domElement, false ).enable();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.sphere = new THREE.Mesh( new THREE.SphereGeometry( 1, 32, 16 ), SphereMat() );
+    Ref.sphere.position.y = 1.0;
+    App.scene.add( Ref.sphere );
+    
+    Ref.baller = new Baller( Ref.sphere );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+    // App.renderLoop();
+});
+
+function onPreRender( dt, et ){
+    const arrows = Ref.kb.getArrowAxes();
+    Ref.baller.update( dt, arrows );
+}
+// #endregion
+
+class Baller{
+    // #region MAIN
+    radius      = 1;
+    arcLen      = Math.PI * this.radius * 2; // C = Pi * 2R;
+    rot         = new Quat();
+    vec         = new Vec3();
+    axis        = new Vec3();
+    tmp         = new Vec3();
+    mesh        = null;
+    maxSpeed    = 0.2;
+    accel       = 0.13;
+    decel       = 0.97;
+    constructor( mesh ){
+        this.mesh = mesh;
+    }
+    // #endregion
+
+    update( dt, dir ){
+
+        if( dir[0] === 0 && dir[1] === 0 ){
+            // Decelerate
+            this.vec.scale( this.decel ).nearZero();
+        }else{
+            // Accelerate
+            const inc = this.accel * dt;
+            // if( dir[0] < 0 ) this.vec.addScaled( Vec3.LEFT, inc );
+            // if( dir[0] > 0 ) this.vec.addScaled( Vec3.RIGHT, inc );
+            // if( dir[1] > 0 ) this.vec.addScaled( Vec3.BACK, inc );
+            // if( dir[1] < 0 ) this.vec.addScaled( Vec3.FORWARD, inc );
+
+            this.tmp.xyz( 0,0,0 );
+
+            if( dir[0] < 0 ) this.tmp.add( Vec3.LEFT );
+            if( dir[0] > 0 ) this.tmp.add( Vec3.RIGHT );
+            if( dir[1] > 0 ) this.tmp.add( Vec3.BACK );
+            if( dir[1] < 0 ) this.tmp.add( Vec3.FORWARD );
+
+            this.tmp.norm().scale( inc );
+            this.vec.add( this.tmp );
+            
+            if( this.vec.len > this.maxSpeed ){
+                this.vec.norm().scale( this.maxSpeed );
+            }
+        }
+
+        if( this.vec.len >= 0.000001 ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Move
+            const pos = this.mesh.position.toArray();
+            this.mesh.position.fromArray(
+                this.tmp.fromAdd( pos, this.vec )
+            );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Rotate
+            const rot = this.mesh.quaternion.toArray();
+            const rad = ( Math.PI * 2 ) * ( this.vec.len / this.arcLen ); // Speed to sphere arc rotation
+            
+            this.axis.fromCross( [0,1,0], this.vec ).norm(); // Rotation Access to apply
+            
+            this.rot    // Apply rotation 
+                .fromAxisAngle( this.axis, rad )
+                .mul( rot );
+
+            this.mesh.quaternion.fromArray( this.rot );
+        }
+
+        return this;
+    }
+}
+
+
+
+class Ball{
+    // #region MAIN
+    sphere_radius =  0.806604; 
+    sphere_len    = Math.PI * this.sphere_radius * 2; // C = Pi * 2R;
+    mesh          = null;
+    skel          = null;
+    
+    speed         = new SpringIE_Float().setOscPs( 0.2 ).setDamp( 0.7 );
+    speedMax      = 0.1;
+    rotate        = new SpringIE_Float().setOscPs( 1.0 ).setDamp( 0.7 );
+    rotateMax     = 2 * ( Math.PI / 180 );
+
+    direction     = [0,0,1];
+
+    constructor(){}
+    // #endregion
+
+    update( dt ){
+        const arrows = Ref.keyboard.getArrowState();
+        const bone  = this.skel.bones[ 1 ];
+        
+        const fwd = ( arrows.up )? 1    :
+                    ( arrows.down )? -1 : 0;
+
+        const steer = ( arrows.right )? -1 :
+                      ( arrows.left )? 1 : 0;
+        
+        this.speed.setOscPs( (fwd === 0)? 0.6 : 0.3 );
+        this.speed.setTarget( fwd * this.speedMax ).update( dt );
+        this.rotate.setTarget( steer * this.rotateMax ).update( dt );
+
+        // Change Direction
+        if( this.rotate.value !== 0 ){
+            vec3.rotateY( this.direction, this.direction, [0,0,0], this.rotate.value );
+        }
+        
+        // Move Sphere
+        if( this.speed.value !== 0 ){
+            const axis  = vec3.cross( [0,0,0], [0,1,0], this.direction );
+            const ang   = ( Math.PI * 2 ) * ( this.speed.value / this.sphere_len );
+            const q     = quat.setAxisAngle( [0,0,0,1], axis, ang );
+            const p     = vec3.scale( [0,0,0], this.direction, this.speed.value );
+
+            quat.mul( q, q, bone.quaternion.toArray() );
+            bone.quaternion.fromArray( q );
+
+            vec3.add( p, bone.position.toArray(), p );
+            bone.position.fromArray( p );
+        }
+
+        // Show Direction 
+        let p = bone.position.toArray();
+        Debug.ln.reset().add( p, vec3.scaleAndAdd( [0,0,0], p, this.direction, 2 ), 0x00ff00 );
+    }
+}
+
+
+
+</script></body></html>

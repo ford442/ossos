@@ -1,3 +1,13 @@
+DUAL QUAT SKINNING WITH SCALING ???
+- Can scale a quat by the sqrt( scaleValue )
+- Scale can be lost with normalization
+-- Split into two parts, Build WS first so
+   scaling can be passed down the tree better
+   then normalize it.
+-- Can try not to normalize it as all, only normalize after weighting
+
+
+
 DIFFERENT WAY TO HANDLE MATRIX SKINNING
 
 For funky way to handle skeleton that are scaled up & rotated in relation to the mesh
