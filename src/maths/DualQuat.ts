@@ -1,6 +1,6 @@
 
 
-class DualQuat extends Array< number >{
+class DualQuat extends Array< number > {
     // #region STATIC VALUES
     static BYTESIZE = 8 * Float32Array.BYTES_PER_ELEMENT;
     // #endregion

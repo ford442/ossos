@@ -41,7 +41,8 @@ window.addEventListener( 'load', async _=>{
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // Build Skeleton
-    const arm = createTestChain( [ [0,0.4,0], [0,0.3,0], [0,0.6,0], [0,0.3,0] ] );
+    // const arm = createTestChain( [ [0,0.4,0], [0,0.3,0], [0,0.6,0], [0,0.3,0] ] );
+    const arm = createTestChain( [ [0,0.4,0], [0,1.9630490810141605,0], [0,1.7868094709271223,0], [0,0.7137383919268478,0] ] );
     Util.debugBones( arm.poses.bind.bones, Debug, 0.2, 1, false );
 
     Ref.arm     = arm;
@@ -53,6 +54,8 @@ window.addEventListener( 'load', async _=>{
 
     poseCubes( Ref.pose );
     runSolver();
+
+    console.log( 'xxx', Ref.ikt.dist );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     //App.createRenderLoop( onPreRender ).start();

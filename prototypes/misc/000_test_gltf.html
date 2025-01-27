@@ -5,7 +5,7 @@
 import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
 
 import { Armature, Pose, TranMatrixSkin,
-    Transform, Mat4,
+    Mat4,
 } from '../../src/index';
 import MatrixSkinMaterial           from '../_lib/customSkinning/MatrixSkinMaterial.js';
 import Util                         from '../_lib/misc/Util.js';
@@ -20,46 +20,59 @@ let Debug;
 window.addEventListener( 'load', async _=>{
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // Setup
-    App.sphericalLook( 20, 20, 3, [0,1,0] );
+    App.sphericalLook( 0, 20, 6 );
     Debug = await useVisualDebug( App );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // #region DOWNLOAD FILE
+    // const url  = '/prototypes/_res/models/pete/pete.gltf';
     const url  = '/prototypes/_res/models/Michelle.glb';
     const gltf = await Gltf2.fetch( url );
+
+    console.log( gltf );
+
+    // Check if Draco is on the list, means bin is compressed.
+    // console.log( gltf.json.extensionsUsed );
     // #endregion
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // #region PARSE & RENDER SKELETON
     const arm  = getArmature( gltf );
-    Util.debugBones( arm.bindPose.bones, Debug, 0.05, 0.8 );
+    // console.log( arm );
+
+    console.log( 'Bone Count', arm.bindPose.bones.length );
+    
+    // Util.debugBones( arm.bindPose.bones, Debug, 0.05, 0.8 );
+    // Util.debugBones( arm.poses.offset.bones, Debug, 0.05, 0.8 );
     // #endregion
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // #region PARSE & RENDER MESH
+    
+    // const meshes = getMesh( gltf, null ); // Load a specific mesh
     const meshes = getMesh( gltf, null, arm ); // Load a specific mesh for skin rendering
+    console.log( 'Total Submeshes?', meshes.length );
     App.scene.add( ...meshes );
+    
     // #endregion
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // #region POSING
-    // console.log( arm.names );
     const pose = arm.newPose();
-    pose.bones[0].local.pos[0] = 1;                     // Hip
-    pose.bones[0].local.pos[2] -= 1;    
-    pose.bones[1].local.rot.rotY( Math.PI * -0.2 );     // Spine
-    pose.bones[5].local.rot.rotX( Math.PI * -0.2 );     // Head
+    pose.offset.reset();
+    pose.updateWorld();
+    arm.updateBoneLengths( pose );
 
-    pose.bones[55].local.rot.rotX( Math.PI * 0.5 );     // Thigh
-    pose.bones[56].local.rot.rotX( Math.PI * -0.5 );    // Shin
-    pose.bones[57].local.rot.rotX( Math.PI * -0.3 );    // Foot
+    console.log( 'xxx', pose.offset );
+    pose.bones[0].local.pos[0] = 1;
+    pose.bones[0].local.pos[2] -= 1;
+    pose.bones[1].local.rot.rotY( Math.PI * 0.1 );
 
-    pose.bones[8].local.rot.rotZ( Math.PI * 0.3 );      // Upper Arm
-    pose.bones[9].local.rot.rotZ( Math.PI * 0.6 );      // Lower Arm
+    pose.updateWorld();
+    arm.skin.updateFromPose( pose );
 
-    pose.updateWorld();                              // Update
-    arm.skin.updateFromPose( pose );                 // Update Skinning Shaders
-    Util.debugBones( pose.bones, Debug, 0.05, 0.8 ); // View Bones
+    Util.debugBones( pose.bones, Debug, 0.05, 0.8 );
+
     // #endregion
     
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -72,52 +85,59 @@ window.addEventListener( 'load', async _=>{
 function getArmature( gltf, minLen=0.1 ){
     const skin  = gltf.getSkin();
     const arm   = new Armature();
-    let hasOffset = false;
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // Create Armature Skeleton
     let b;
     for( const j of skin.joints ){
         b = arm.addBone( { name: j.name, parent: j.parentIndex } );
         if( j.rotation ) b.local.rot.copy( j.rotation );
         if( j.position ) b.local.pos.copy( j.position );
         if( j.scale )    b.local.scl.copy( j.scale );
+
+        // console.log( j );
     }
 
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // APPLY OFFSET TRANFORM - THEN CLEARN UP THE TRANSFORM HEIRARCHY
-    if( skin.position || skin.scale || skin.rotation  ){
-        const pose = arm.bindPose;
-        const t    = new Transform();
-        let   pworld;
+    arm.bindPose.offset.rot.copy( skin.rotation );
+    arm.bindPose.offset.scl.copy( skin.scale );
 
-        // Apply Offset Transform to BindPose
-        if( skin.position ) pose.offset.pos.copy( skin.position );
-        if( skin.rotation ) pose.offset.rot.copy( skin.rotation );
-        if( skin.scale  )   pose.offset.scl.copy( skin.scale  );
-        pose.updateWorld();     // Create Worldspace Skeleton with Offset Applied
-        pose.offset.reset();    // Clear out offset to rebuild localspace without it
-
-        for( let b of pose.bones ){
-            // Bone's parent worldspace Transform
-            pworld = b.pindex !== -1 
-                ? pose.bones[ b.pindex ].world 
-                : pose.offset;
-
-            t.fromInvert( pworld );             // Invert Parent's Worldspace Transform
-            b.local.fromMul( t, b.world );      // Then apply to bone to compute localspace
-            b.local.scl.xyz( 1, 1, 1 );         // Prevent scale offset from propegating
-            b.world.fromMul( pworld, b.local ); // Recompute worldspace to propegate scaleless offset
-        }
-    }
-
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // Finalize bone & instialize one of the skinning algorithms
     arm.bind( minLen );
-    arm.useSkin( TranMatrixSkin ); // Unreal Engine: Transform Worldspace to Mat4x4
+    arm.useSkin( TranMatrixSkin );
+
+    /*
+    console.log( arm.poses.bind );
+
+    const m4 = new Mat4(  skin.joints[0].bindMatrix );
+    console.log( 'Original', m4 );
+    console.log( 'Inverted', m4.invert() );
+
+    const rot = [0,0,0,0];
+    const pos = [0,0,0];
+    const scl = [1,0,0];
+    m4.decompose( rot, pos, scl );
+    console.log( 'Decompose', 'Rot', rot, 'Pos', pos, 'Scl', scl );
+    console.log( 'Local', 'Rot', skin.joints[0].rotation ,'Pos', skin.joints[0].position, 'Scl', skin.joints[0].scale  );
+    console.log( 'Offset', 'Rot', skin.rotation, 'Pos', skin.position, 'Scl', skin.scale );
+
+    const mm = new Mat4().fromQuatTranScale( skin.rotation, [0,0,0], skin.scale );
+    console.log( 'Offset Matrix', mm );
+    
+    console.log( 'Test', mm.invert().mul( m4 ) );
+    mm.decompose( rot, pos, scl );
+    console.log( 'Decompose2', 'Rot', rot, 'Pos', pos, 'Scl', scl );
+    */
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if( skin.position || skin.scale || skin.rotation  ){
+        const opose = arm.newPose( 'offset' );
+        if( skin.position ) opose.offset.pos.copy( skin.position );
+        if( skin.rotation ) opose.offset.rot.copy( skin.rotation );
+        if( skin.scale  ) opose.offset.scl.copy( skin.scale  );
+        opose.updateWorld();
+    }
 
     return arm;
 }
+
 
 /** Turn GLTF Mesh into a collection of 3JS Meshes */
 function getMesh( gltf, id=null, arm ){
@@ -166,5 +186,6 @@ function geoPrimitive( prim, useSkin=true ){
 
     return geo;
 }
+
 
 </script></body></html>

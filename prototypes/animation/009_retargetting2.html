@@ -27,13 +27,14 @@ window.addEventListener( 'load', async _=>{
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Ref.anim  = await Animation.fetch( 'Catwalk' );
     Ref.char0 = await Character.fetch( '/prototypes/_res/models/pete/pete.gltf' );
-    Ref.char1 = await Character.fetch( '/prototypes/_res/models/hero/hero.gltf' );
+    // Ref.char1 = await Character.fetch( '/prototypes/_res/models/hero/hero.gltf' );
+    Ref.char1 = await Character.fetch( '/prototypes/_res/models/Michelle.glb' );
 
     Ref.char0.setPos( [1.5,0,0] );
-    Ref.char1.setPos( [-1.5,0,0] );
+    // Ref.char1.setPos( [-1.5,0,0] );
 
     App.scene.add( Ref.char0.mesh );
-    App.scene.add( Ref.char1.mesh );;
+    App.scene.add( Ref.char1.mesh );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Ref.rt0 = new Retarget();
@@ -51,30 +52,35 @@ window.addEventListener( 'load', async _=>{
     Ref.rt1
         .autoBindTPoses(
             Ref.anim.arm.poses.opose,    // Use Offset Pose because its a mixamo animation
-            Ref.char1.tpose,      // Character is in a TPose by default
+            Ref.char1.tpose,            // Character is in a TPose by default
         )
         .animator
             .setClip( Ref.anim.clip )
             .usePlacementReset( [0,0,1] ) // This animation uses Z for up.
             .start();
 
-    // onPreRender( 0.1 );
+
+    Util.debugBones( Ref.rt1.tarPose.bones, Debug, 0.08, 1, false, 0x00ff00, 0xffffff );
+    onPreRender( 0.1 );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    App.createRenderLoop( onPreRender ).start();
-    // App.renderLoop( onPreRender );
+    // App.createRenderLoop( onPreRender ).start();
+    App.renderLoop( onPreRender );
 });
 
 function onPreRender( dt, et ){
     Debug.pnt.reset();
     Debug.ln.reset();
-    Util.debugBones( Ref.rt0.srcPose.bones, Debug, 0.08, 1, false, 0x00ff00, 0xffffff );
-
+    
     Ref.rt0.step( dt )
     Ref.char0.arm.skin.updateFromPose( Ref.rt0.tarPose );
 
     Ref.rt1.step( dt )
     Ref.char1.arm.skin.updateFromPose( Ref.rt1.tarPose );
+
+    Util.debugBones( Ref.rt0.srcPose.bones, Debug, 0.08, 1, false, 0x00ff00, 0xffffff );
+
+    Util.debugBones( Ref.rt1.tarPose.bones, Debug, 0.08, 1, false, 0x00ff00, 0xffffff );
 }
 
 class Animation{
@@ -114,7 +120,7 @@ class Character{
     constructor( gltf ){
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // Armature
-        this.arm = GltfUtil.parseArmature( gltf );
+        this.arm = GltfUtil.parseArmature( gltf, true );
         this.arm.useSkin( TranMatrixSkin );
 
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,6 +142,10 @@ class Character{
 
             this.tpose.updateWorld();
             this.arm.skin.updateFromPose( this.tpose );
+        }else{
+            this.tpose = this.arm.poses.opose || this.arm.poses.bind;
+            this.tpose.updateWorld();
+            console.log( this.arm.poses );
         }
     }
 

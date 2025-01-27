@@ -1,0 +1,327 @@
+// Pseudocode showing how TSL compiles function-based shader code
+
+class TSLContext {
+    constructor() {
+        this.currentScope = null
+        this.scopes = []
+        this.variables = new Map()
+        this.flowNodes = []
+    }
+}
+
+// Main function wrapper that creates shader nodes
+function Fn(callback) {
+    return (...args) => {
+        const context = new TSLContext()
+        
+        // Create a new scope for this function
+        context.currentScope = {
+            inputs: new Map(),
+            variables: new Map(),
+            flowNodes: []
+        }
+        
+        // Process input parameters
+        const params = processParameters(args)
+        
+        // Execute the callback in this context
+        const result = executeInContext(callback, context, params)
+        
+        // Convert the result into shader nodes
+        return buildShaderNodes(context, result)
+    }
+}
+
+// Handles node operations like .toVar(), .greaterThan(), etc.
+class NodeProxy {
+    constructor(node, context) {
+        this.node = node
+        this.context = context
+    }
+    
+    toVar() {
+        // Create a new variable declaration node
+        const varNode = new VariableNode(this.node)
+        this.context.variables.set(varNode.id, varNode)
+        return new NodeProxy(varNode, this.context)
+    }
+    
+    greaterThan(value) {
+        return new NodeProxy(
+            new OperationNode('>', this.node, value),
+            this.context
+        )
+    }
+    
+    // Other operations like assignment
+    set y(value) {
+        const assignNode = new AssignmentNode(
+            new SwizzleNode(this.node, 'y'),
+            value
+        )
+        this.context.flowNodes.push(assignNode)
+    }
+}
+
+// Conditional flow control
+function If(condition, thenCallback) {
+    const context = getCurrentContext()
+    
+    const ifNode = new FlowNode('if', condition)
+    context.flowNodes.push(ifNode)
+    
+    // Create new scope for the if block
+    const previousScope = context.currentScope
+    context.currentScope = {
+        parent: previousScope,
+        flowNodes: []
+    }
+    
+    // Execute the then block
+    thenCallback()
+    
+    // Add the then block nodes to the if node
+    ifNode.thenBlock = context.currentScope.flowNodes
+    
+    // Restore previous scope
+    context.currentScope = previousScope
+    
+    // Return object with ElseIf method for chaining
+    return {
+        ElseIf: (condition, callback) => {
+            const elseIfNode = new FlowNode('elseif', condition)
+            ifNode.elseIfBlocks.push(elseIfNode)
+            
+            // Create new scope for the else-if block
+            context.currentScope = {
+                parent: previousScope,
+                flowNodes: []
+            }
+            
+            callback()
+            
+            elseIfNode.thenBlock = context.currentScope.flowNodes
+            context.currentScope = previousScope
+            
+            return this
+        }
+    }
+}
+
+// Example of how nodes are compiled to WGSL
+function compileToWGSL(node) {
+    switch (node.type) {
+        case 'variable':
+            return `var ${node.id} = ${compileToWGSL(node.value)};`
+            
+        case 'operation':
+            return `${compileToWGSL(node.left)} ${node.operator} ${compileToWGSL(node.right)}`
+            
+        case 'if':
+            return `
+                if (${compileToWGSL(node.condition)}) {
+                    ${node.thenBlock.map(compileToWGSL).join('\n')}
+                } ${node.elseIfBlocks.map(block => `
+                else if (${compileToWGSL(block.condition)}) {
+                    ${block.thenBlock.map(compileToWGSL).join('\n')}
+                }`).join('')}
+            `
+            
+        case 'assignment':
+            return `${compileToWGSL(node.target)} = ${compileToWGSL(node.value)};`
+            
+        case 'swizzle':
+            return `${compileToWGSL(node.vector)}.${node.component}`
+    }
+}
+
+// When material.positionNode is set, it triggers compilation
+class Material {
+    set positionNode(node) {
+        // Compile the node tree into WGSL
+        const wgsl = compileToWGSL(node)
+        
+        // Generated WGSL for the example would look like:
+        /*
+            var result = position.xyz;
+            if (result.y > 10.0) {
+                result.y = 10.0;
+            } else if (result.y < 10.0) {
+                result.y = 10.0;
+            }
+        */
+    }
+}
+
+// Base class for all nodes
+class Node {
+    constructor(nodeType) {
+        this.nodeType = nodeType
+        this.id = generateUniqueId()  // Unique identifier for this node
+    }
+}
+
+// Represents a shader variable declaration and initialization
+class VariableNode extends Node {
+    constructor(valueNode, type = null) {
+        super('variable')
+        this.valueNode = valueNode  // Node providing the initial value
+        this.type = type || inferType(valueNode)  // WGSL type like 'vec3<f32>'
+    }
+    
+    generate(context) {
+        const value = this.valueNode.generate(context)
+        const varName = `v${this.id}`  // Generate unique variable name
+        
+        return {
+            name: varName,
+            declaration: `var ${varName}: ${this.type} = ${value};`,
+            type: this.type
+        }
+    }
+}
+
+// Represents assignment operations like result.y = limit
+class AssignmentNode extends Node {
+    constructor(targetNode, valueNode) {
+        super('assignment')
+        this.targetNode = targetNode  // Left side of assignment (what we're assigning to)
+        this.valueNode = valueNode    // Right side (the value being assigned)
+    }
+    
+    generate(context) {
+        const target = this.targetNode.generate(context)
+        const value = this.valueNode.generate(context)
+        
+        // Check type compatibility
+        if (!areTypesCompatible(target.type, value.type)) {
+            throw new Error(`Cannot assign ${value.type} to ${target.type}`)
+        }
+        
+        return {
+            code: `${target.code} = ${value.code};`,
+            type: target.type
+        }
+    }
+}
+
+// Handles mathematical and logical operations
+class OperationNode extends Node {
+    constructor(operator, leftNode, rightNode) {
+        super('operation')
+        this.operator = operator      // e.g., '+', '*', '>', '<', etc.
+        this.leftNode = leftNode      // Left operand
+        this.rightNode = rightNode    // Right operand
+    }
+    
+    generate(context) {
+        const left = this.leftNode.generate(context)
+        const right = this.rightNode.generate(context)
+        
+        // Handle type conversions if needed
+        const { leftCode, rightCode, resultType } = this.resolveTypes(left, right)
+        
+        return {
+            code: `(${leftCode} ${this.operator} ${rightCode})`,
+            type: resultType
+        }
+    }
+    
+    // Handle type resolution and automatic conversion
+    resolveTypes(left, right) {
+        switch (this.operator) {
+            case '+':
+            case '-':
+            case '*':
+            case '/':
+                // Numeric operations
+                return this.resolveNumericOperation(left, right)
+                
+            case '>':
+            case '<':
+            case '>=':
+            case '<=':
+                // Comparison operations
+                return this.resolveComparisonOperation(left, right)
+                
+            // ... other operators
+        }
+    }
+    
+    resolveNumericOperation(left, right) {
+        // Example type resolution for vec3 * float
+        if (left.type === 'vec3<f32>' && right.type === 'f32') {
+            return {
+                leftCode: left.code,
+                rightCode: right.code,
+                resultType: 'vec3<f32>'
+            }
+        }
+        
+        // Example type resolution for float * float
+        if (left.type === 'f32' && right.type === 'f32') {
+            return {
+                leftCode: left.code,
+                rightCode: right.code,
+                resultType: 'f32'
+            }
+        }
+        
+        // Handle other type combinations...
+        throw new Error(`Unsupported operation: ${left.type} ${this.operator} ${right.type}`)
+    }
+}
+
+// Example usage based on your code snippet:
+function createLimitPositionNodes() {
+    // Create variable node for the result
+    const positionVar = new VariableNode(
+        new OperationNode('vec3', positionInput, null),
+        'vec3<f32>'
+    )
+    
+    // Create comparison node for y > limit
+    const greaterThanNode = new OperationNode(
+        '>',
+        new SwizzleNode(positionVar, 'y'),
+        new LiteralNode(10.0)
+    )
+    
+    // Create assignment node for setting y component
+    const assignYNode = new AssignmentNode(
+        new SwizzleNode(positionVar, 'y'),
+        new LiteralNode(10.0)
+    )
+    
+    // Generated WGSL might look like:
+    /*
+        var v1: vec3<f32> = vec3<f32>(position);
+        if (v1.y > 10.0) {
+            v1.y = 10.0;
+        }
+    */
+}
+
+example
+const limitPosition = Fn( ( { position } ) => {
+
+	const limit = 10;
+
+	// Convert to variable using `.toVar()` to be able to use assignments.
+	const result = position.toVec3().toVar();
+
+	If( result.y.greaterThan( limit ), () => {
+
+		result.y = limit;
+
+	} ).ElseIf( result.y.lessThan( limit ), () => {
+
+		result.y = limit;
+
+	} );
+
+	return result;
+
+} );
+
+material.positionNode = limitPosition( { position: positionLocal } );

@@ -1,0 +1,55 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+//#region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene } from '../_lib/useThreeWebGL2.js';
+import Util                 from '../_lib/misc/Util.js';
+import { vec3, quat }       from 'gl-matrix';
+import Gltf2                from '../_lib/gltf2Parser.es.js';
+//#endregion
+
+//#region MAIN
+let App = useDarkScene( useThreeWebGL2() );
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 50, 30, 3, [ 0, 0, 0 ] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Skinned Mesh from GLTF Model
+    const gltf = await Gltf2.fetch( '/prototypes/_res/models/MK01.gltf' );
+    // const char = gltfThreeSkinnedMesh( gltf, true );
+    // char.mesh.position.z = -1.5;
+    // App.scene.add( char.mesh, char.boneView );
+
+    console.log( gltf.json.meshes );
+
+    App.scene.add( gltfMesh( gltf, 'OuterBody' )  );
+    App.scene.add( gltfMesh( gltf, 'InnerBody' )  );
+    App.scene.add( gltfMesh( gltf, 'EyeInner' )  );
+    App.scene.add( gltfMesh( gltf, 'EyelidUp' )  );
+    App.scene.add( gltfMesh( gltf, 'EyelidDn' )  );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+//#endregion
+
+function gltfMesh( gltf, fName ){
+    const gMesh = gltf.getMesh( fName );
+    const gPrim = gMesh.primitives[ 0 ];
+    const bGeo  = Util.geoBuffer(
+        gPrim.position.data,
+        gPrim.indices.data, 
+        gPrim.normal.data, 
+        // gPrim.texcoord_0.data, 
+        // gPrim.joints_0.data, 
+        // gPrim.weights_0.data, 
+        // gPrim.weights_0.componentLen,
+    );
+
+    return new THREE.Mesh( bGeo, new THREE.MeshPhongMaterial() );
+}   
+
+</script></body></html>

@@ -1,6 +1,6 @@
 import type { ConstQuat } from './Quat';
 
-export type TVec3     = [number,number,number] | Float32Array | Array<number> | number[];
+export type TVec3     = [number, number, number] | Float32Array | Array<number> | number[];
 export type ConstVec3 = Readonly< TVec3 >;
 
 export default class Vec3 extends Array< number > {
@@ -70,12 +70,12 @@ export default class Vec3 extends Array< number > {
         a[ 2 ] = this[ 2 ];
         return this;
     }
-    
+
     setInfinite( sign:number=1 ): this{
         this[ 0 ] = Infinity * sign;
         this[ 1 ] = Infinity * sign;
         this[ 2 ] = Infinity * sign;
-        return this
+        return this;
     }
 
     /** Generate a random vector. Can choose per axis range */
@@ -355,7 +355,7 @@ export default class Vec3 extends Array< number > {
     // #endregion
 
     // #region TRANFORMS
-    transformQuat( q: ConstQuat ): this{ 
+    transformQuat( q: ConstQuat ): this{
         const qx = q[ 0 ],    qy = q[ 1 ],    qz = q[ 2 ], qw = q[ 3 ],
               vx = this[ 0 ], vy = this[ 1 ], vz = this[ 2 ],
               x1 = qy * vz - qz * vy,
@@ -385,7 +385,7 @@ export default class Vec3 extends Array< number > {
         return this;
     }
 
-    rotate( rad: number, axis="x" ): this{
+    rotate( rad: number, axis='x' ): this{
         // https://www.siggraph.org/education/materials/HyperGraph/modeling/mod_tran/3drota.htm
         const sin = Math.sin( rad ),
               cos = Math.cos( rad ),
@@ -412,7 +412,7 @@ export default class Vec3 extends Array< number > {
     }
     // #endregion
 
-    // #region STATIC    
+    // #region STATIC
     static len( a: ConstVec3 ): number{ return Math.sqrt( a[ 0 ]**2 + a[ 1 ]**2 + a[ 2 ]** 2 ); }
     static lenSqr( a: ConstVec3 ): number{ return a[ 0 ]**2 + a[ 1 ]**2 + a[ 2 ]** 2; }
 
@@ -430,7 +430,7 @@ export default class Vec3 extends Array< number > {
         return out;
     }
 
-    static scaleThenAdd( scale: number, a: ConstVec3, b: ConstVec3, out:TVec3 = new Vec3() ) {
+    static scaleThenAdd( scale: number, a: ConstVec3, b: ConstVec3, out:TVec3 = new Vec3() ){
         out[0] = a[0] * scale + b[0];
         out[1] = a[1] * scale + b[1];
         out[2] = a[2] * scale + b[2];

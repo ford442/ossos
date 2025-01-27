@@ -1,0 +1,205 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+
+import { Armature, Pose, TranMatrixSkin, MatrixSkin, Vec3, Quat, Mat4 } from '../../src/index';
+import MatrixSkinMaterial from '../_lib/customSkinning/MatrixSkinMaterial.js';
+
+import { Gltf2 }          from '../_lib/misc/GltfUtil.js';
+// #endregion
+
+// #region MAIN
+let App = useDarkScene( useThreeWebGL2() );
+let Debug;
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 0, 20, 3, [0,0.8,0] );
+    Debug = await useVisualDebug( App );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // #region DOWNLOAD FILE
+    const url  = '/prototypes/_res/models/ue5/ue5_quinn.gltf';
+    const gltf = await Gltf2.fetch( url );
+    // #endregion
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // #region PARSE & RENDER SKELETON
+    const arm = parseArmature( gltf );
+
+    console.log( arm );
+    // console.log( 'Bone Count', arm.bindPose.bones.length );
+    // debugBones( arm.bindPose.bones, Debug, 0.05, 0.8 );
+
+    // #endregion
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // #region PARSE & RENDER MESH
+
+    const meshes = parseMesh( gltf, null, arm, true );
+    console.log( 'Total Submeshes?', meshes.length );
+    App.scene.add( ...meshes );
+    
+    // #endregion
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // #region POSING
+    
+    const pose = arm.newPose();
+
+    const uarm  = pose.getBone( 'upperarm_l' );
+    const larm  = pose.getBone( 'lowerarm_l' );
+    const hand0 = pose.getBone( 'lowerarm_twist_02_l' );
+    const hand1 = pose.getBone( 'hand_l' );
+
+    // const s0 = 0.5;
+    // const s1 = 1.0 / s0;
+    // const s2 = 1.4;
+    // const s3 = 2.0;
+
+    // uarm.local.scl.xyz( s0,s0,s0 );
+    // larm.local.scl.xyz( s1,s1,s1 );
+    // larm.local.pos.scale( 2.0 );
+
+    // hand0.local.scl.xyz( s2,s2,s2 );
+    // hand1.local.scl.xyz( s3,s3,s3 );
+
+    // const s0 = 0.5;
+    // const s1 = 1.0 / s0;
+    // const s2 = 1.4;
+    // const s3 = 2.0;
+
+    uarm.local.scl.xyz( 1,2,1 );
+
+    pose.updateWorld();
+    arm.skin.updateFromPose( pose );
+
+    // debugBones( arm.bindPose.bones, Debug, 0.05, 0.8 );
+
+    // const a = pose.getBone( 'upperarm_twist_01_l' );
+    // const b = pose.getBone( 'upperarm_twist_02_l' );
+
+    // a.local.pos.scale( 1.5 );
+    // b.local.pos.scale( 1.5 );
+
+    // #endregion
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+// #endregion
+
+// #region INITAL SKINNED MESH SETUP
+// Debug Pose Bones
+function debugBones( ary, debug, flen=0.2, pntSize=1, doReset=false, boneColor=0x00ffff, jntColor=0x00ff00 ){
+    const up   = new Vec3();
+    const fwd  = new Vec3();
+
+    if( doReset ){
+        debug.pnt.reset();
+        debug.ln.reset();
+    }
+
+    for( let b of ary ){
+        up  .fromQuat( b.world.rot, Vec3.UP )
+            .scale( b.len * b.world.scl[1] )
+            // .scale( b.len ) // if scale exists in offset, things will render incorrectly
+            .add( b.world.pos );
+
+        fwd .fromQuat( b.world.rot, Vec3.FORWARD )
+            .scale( flen )
+            .add( b.world.pos );
+
+        debug.pnt.add( b.world.pos, jntColor, pntSize, 1 );
+        debug.ln.add( b.world.pos, fwd, jntColor );
+        debug.ln.add( b.world.pos, up, boneColor );
+    }
+}
+
+// Turn GLTF Skeleton to an OSSOS Armature
+function parseArmature( gltf, minLen=0.1 ){
+    const skin  = gltf.getSkin();
+    const arm   = new Armature();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Armature Skeleton
+    let b;
+    for( const j of skin.joints ){
+        b = arm.addBone( { name: j.name, parent: j.parentIndex } );
+        if( j.rotation ) b.local.rot.copy( j.rotation );
+        if( j.position ) b.local.pos.copy( j.position );
+        if( j.scale )    b.local.scl.copy( j.scale );
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Set offset before binding, GLTF's inverseMatrices will
+    // include this in the bindpose which I think shouldnt
+    if( skin.position || skin.scale || skin.rotation  ){
+        const pose = arm.bindPose;
+        if( skin.position ) pose.offset.pos.copy( skin.position );
+        if( skin.rotation ) pose.offset.rot.copy( skin.rotation );
+        if( skin.scale  )   pose.offset.scl.copy( skin.scale  );
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Finalize bone & instialize one of the skinning algorithms
+    arm.bind( minLen );
+    arm.useSkin( MatrixSkin );
+    // arm.useSkin( TranMatrixSkin );
+
+    return arm;
+}
+
+// Turn GLTF Mesh into a collection of 3JS Meshes
+function parseMesh( gltf, id=null, arm, useTex=true ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Parse out a single mesh
+    const m = gltf.getMesh( id );
+    if( !m || m.primitives.length == 0 ){ console.error( 'No gltf mesh found', id ); return null;}
+    // console.log( 'GLTF Mesh', m );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const out = [];
+    let mat;
+    for( let p of m.primitives ){
+        // console.log( 'Primitive', p );
+
+        // -------------------------------
+        const gMat = gltf.getMaterial( p.materialName );
+        if( useTex && gMat.baseTexture && gMat.baseTexture.uri ){
+            const tex = new THREE.TextureLoader().load( gltf.path + gMat.baseTexture.uri );
+            tex.flipY = false;
+            mat = MatrixSkinMaterial( tex, arm.skin );
+        }else mat = MatrixSkinMaterial( gMat.baseColor ?? 0x808080, arm.skin );
+
+        // -------------------------------
+        const geo  = geoPrimitive( p );
+        const mesh = new THREE.Mesh( geo, mat );
+        out.push( mesh );
+    }
+
+    return out;
+}
+
+// Turn GLTF Primitive data into 3JS Geometry
+function geoPrimitive( prim, useSkin=true ){
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute( 'position', new THREE.BufferAttribute( prim.position.data, prim.position.componentLen ) );
+
+    if( prim.indices )    geo.setIndex( new THREE.BufferAttribute( prim.indices.data, 1 ) );
+    if( prim.normal )     geo.setAttribute( 'normal', new THREE.BufferAttribute( prim.normal.data, prim.normal.componentLen ) );
+    if( prim.texcoord_0 ) geo.setAttribute( 'uv', new THREE.BufferAttribute( prim.texcoord_0.data, prim.texcoord_0.componentLen ) );
+
+    if( useSkin && prim.joints_0 && prim.weights_0 ){
+        geo.setAttribute( 'skinWeight', new THREE.BufferAttribute( prim.weights_0.data, prim.weights_0.componentLen ) );
+        geo.setAttribute( 'skinIndex',  new THREE.BufferAttribute( prim.joints_0.data,  prim.joints_0.componentLen ) );
+    }
+
+    return geo;
+}
+// #endregion
+
+</script></body></html>

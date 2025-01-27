@@ -24,7 +24,9 @@ window.addEventListener( 'load', async _=>{
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // #region DOWNLOAD FILE
-    const url  = '/prototypes/_res/models/agora/alpha_1_1.gltf';
+    // const url  = '/prototypes/_res/models/agora/alpha_1_1.gltf';
+    // const url  = '/prototypes/_res/models/ue5/ue5_quinn.gltf';
+    const url  = '/prototypes/_res/models/atst/atst.gltf';
     const gltf = await Gltf2.fetch( url );
     // console.log( gltf );
 
@@ -41,8 +43,8 @@ window.addEventListener( 'load', async _=>{
     // console.log( 'Bone Count', arm.bindPose.bones.length );
     // debugBones( arm.bindPose.bones, Debug, 0.05, 0.8 );
 
-    const tpose = arm.newPose( 'tpose' );
-    getAnimationPose( gltf, tpose, 'TPose', );
+    // const tpose = arm.newPose( 'tpose' );
+    // getAnimationPose( gltf, tpose, 'TPose', );
     // debugBones( tpose.bones, Debug, 0.05, 0.8 );
     // arm.skin.updateFromPose( tpose );
 
@@ -53,7 +55,7 @@ window.addEventListener( 'load', async _=>{
     
     // const meshes = getMesh( gltf, null ); // Load a specific mesh
     const meshes = getMesh( gltf, null, arm ); // Load a specific mesh for skin rendering
-    // console.log( 'Total Submeshes?', meshes.length );
+    console.log( 'Total Submeshes?', meshes.length );
     App.scene.add( ...meshes );
     
     // #endregion

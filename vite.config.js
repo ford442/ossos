@@ -25,7 +25,7 @@ export default defineConfig(({ command, mode, ssrBuild }) => {
             server    : {
                 host        : 'localhost',
                 port        : 3010,
-                open        : '/',
+                // open        : '/',
                 strictPort  : true,
             },
 

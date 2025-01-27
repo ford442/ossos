@@ -14,6 +14,8 @@ export default function trapezoidCompose( target: IKTarget, chain: IKChain, pose
     // Align the the root bone to the target direction
     lookSolver( target, chain, pose );
 
+    // console.log( target.dist, chain.len );
+
     // If the target is to far away, straighten the limb
     // Else bend the mid joint using the idea of triangles
     if( target.dist >= chain.len ) chain.resetPoseLocal( pose, 1 );

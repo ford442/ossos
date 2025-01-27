@@ -108,6 +108,8 @@ export default class IKTarget {
                 // Do we scale the chain len?
                 this.dist = ( this.lenScale >= 0 )? this.lenScale * chain.len : chain.len;
 
+                // console.log( 'IKDIR', this.dist, this.lenScale, chain.len );
+
                 this.startPos.copy( this.rworld.pos );
                 this.endPos
                     .copy( this.swing )

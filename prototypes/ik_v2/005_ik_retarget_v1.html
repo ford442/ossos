@@ -1,0 +1,694 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import Util                         from '../_lib/misc/Util.js';
+import GltfUtil, { Gltf2 }          from '../_lib/misc/GltfUtil.js';
+import MatrixSkinMaterial           from '../_lib/customSkinning/MatrixSkinMaterial.js';
+
+import { 
+    Armature, TranMatrixSkin,
+    Quat, Vec3, Transform, BoneMap,
+    Pose, PoseAnimator,
+} from '../../src/index';
+
+import {
+    IKRig, BoneAxes, IKTarget, IKChain,
+    lookSolver, swingTwistChainSolver,
+} from '../../src/kinematics2/index';
+// #endregion
+
+// #region MAIN
+let Debug;
+let App = useDarkScene( useThreeWebGL2() );
+let Ref = {};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 20, 20, 3, [ 0, 0.8, 0 ] );
+    Debug = await useVisualDebug( App );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load Character Mesh
+
+    /*
+    loader.json
+    {
+        src     : './nabba.gltf',
+        tpose   : 'bindpose|animation',
+        chains  : { // If chains exists, not auto loading
+            root    : { bones:[], solver:'', axes:0 },
+            hip     : { bones:[], solver:'', axes:0 },
+            spine   : { bones:[], solver:'', axes:0 },
+            head    : { bones:[], solver:'', axes:0 },
+            arm_l   : { bones:[], solver:'', axes:0 },
+            arm_r   : { bones:[], solver:'', axes:0 },
+            hand_l  : { bones:[], solver:'', axes:0 }, 
+            hand_r  : { bones:[], solver:'', axes:0 },
+            leg_l   : { bones:[], solver:'', axes:0 },
+            leg_r   : { bones:[], solver:'', axes:0 },
+            foot_l  : { bones:[], solver:'', axes:0 },
+            foot_r  : { bones:[], solver:'', axes:0 },
+        }
+    */
+
+    const glChar    = await Gltf2.fetch( '/prototypes/_res/models/nabba/nabba.gltf' );
+    const chArm     = parseArmature( glChar );
+
+    const geo       = GltfUtil.loadGeoBuffers( glChar )[0];
+    const mat       = MatrixSkinMaterial( 'gray', chArm.skin );
+    const mesh      = new THREE.Mesh( geo, mat );
+
+    const chPose    = chArm.newPose();
+    chPose.offset.pos.xyz( 1.5, 0, 0 );
+    chPose.updateWorld();
+    chArm.skin.updateFromPose( chPose );
+
+    const chRig = new IKBipedRig( chPose );
+    chRig.executor = customExecutor;
+
+    App.scene.add( mesh );
+
+    Ref.chArm = chArm;
+    Ref.chRig = chRig;
+
+    // chRig.leftHand.chain.debug( Debug, chRig.pose );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load Skeleton & Animation
+    const gltf = await Gltf2.fetch( '/prototypes/_res/anim/mixamo/Catwalk.gltf' );
+    const arm  = parseArmature( gltf );
+    const clip = GltfUtil.loadAnimationClip( gltf, null, arm.bindPose );
+    
+    // console.log( clip.frameCount );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load Animator
+    const anim = new PoseAnimator();
+    anim.setClip( clip );
+    anim.usePlacementReset( [0,0,1] ) // Animation uses Zup, clear XY
+    anim.start();
+
+    Ref.anim = anim;
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup IK
+    const rig       = new IKBipedRig( arm.bindPose );   // IK Rig for Animation Skeleton
+    const ikPose    = new IKBipedPose();                // Compute IK Data for Pose
+    const pose      = arm.newPose();                    // Working Pose
+
+    Ref.rig     = rig;
+    Ref.ikPose  = ikPose;
+    Ref.pose    = pose;
+
+    // rig.leftHand.chain.debug( Debug, pose );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // TEST
+
+    Ref.anim.atFrame( 10 ).updatePose( Ref.pose );
+    // anim.step( 0.1 ).updatePose( pose );
+
+    debugBones( Ref.pose.bones, Debug );
+    computeIKBipedPose( Ref.pose, Ref.rig, Ref.ikPose );
+    debugIKBipedPose( Ref.ikPose, Ref.rig, Ref.pose );
+
+    applyIKPose( Ref.ikPose, Ref.chRig );
+    // Ref.chRig.runSolvers( Debug );
+
+    // Note: No need to compute world for skin, it'll compute its own version
+    Ref.chArm.skin.updateFromPose( Ref.chRig.pose );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+    // App.renderLoop();
+});
+
+function onPreRender( dt, et ){
+    Debug.reset();
+
+    // Run Animation
+    Ref.anim
+        .step( dt )
+        .updatePose( Ref.pose );
+
+    // Ref.anim.atFrame( 10 ).updatePose( Ref.pose );
+    // anim.step( 0.1 ).updatePose( pose );
+
+    debugBones( Ref.pose.bones, Debug );
+    computeIKBipedPose( Ref.pose, Ref.rig, Ref.ikPose );
+    debugIKBipedPose( Ref.ikPose, Ref.rig, Ref.pose );
+
+    applyIKPose( Ref.ikPose, Ref.chRig );
+    // Ref.chRig.runSolvers( Debug );
+
+    Ref.chArm.skin.updateFromPose( Ref.chRig.pose );
+}
+// #endregion
+
+// #region ARMATURE
+// Turn GLTF Skeleton to an OSSOS Armature
+function parseArmature( gltf, minLen=0.1 ){
+    const skin  = gltf.getSkin();
+    const arm   = new Armature();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Armature Skeleton
+    let b;
+    for( const j of skin.joints ){
+        b = arm.addBone( { name: j.name, parent: j.parentIndex } );
+        if( j.rotation ) b.local.rot.copy( j.rotation );
+        if( j.position ) b.local.pos.copy( j.position );
+        if( j.scale )    b.local.scl.copy( j.scale );
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Set offset before binding, GLTF's inverseMatrices will
+    // include this in the bindpose which I think shouldnt
+    if( skin.position || skin.scale || skin.rotation  ){
+        const pose = arm.bindPose;
+        if( skin.position ) pose.offset.pos.copy( skin.position );
+        if( skin.rotation ) pose.offset.rot.copy( skin.rotation );
+        if( skin.scale  )   pose.offset.scl.copy( skin.scale  );
+    }
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Finalize bone & instialize one of the skinning algorithms
+    arm.bind( minLen );
+    arm.useSkin( TranMatrixSkin );
+
+    return arm;
+}
+
+function debugBones( ary, debug, offset=[0,0,0] ){ // flen=0.06, pntSize=0.9, doReset=false,
+    const flen      = 0.06; 
+    const pntSize   = 0.9;
+    const doReset   = false
+
+    const up        = new Vec3();
+    const fwd       = new Vec3();
+    const v         = new Vec3();
+    const boneColor = 0x797979;
+    const jntColor  = 0x909090;
+
+    if( doReset ){
+        debug.pnt.reset();
+        debug.ln.reset();
+    }
+
+    for( let b of ary ){
+        v   .fromAdd( b.world.pos, offset );
+
+        up  .fromQuat( b.world.rot, Vec3.UP )
+            // .scale( b.len * b.world.scl[1] )  
+            .scale( b.len ) // No Scale, can't see bones when dealing with offset transforms that scale characters
+            .add( v );
+
+        fwd .fromQuat( b.world.rot, Vec3.FORWARD )
+            .scale( flen )
+            .add( v );
+
+        debug.pnt.add( v, jntColor, pntSize, 1 );
+        debug.ln.add( v, fwd, jntColor );
+        debug.ln.add( v, up, boneColor );
+    }
+}
+// #endregion
+
+// #region IK RIG
+class IKBipedRig extends IKRig {
+    // #region MAIN
+    hipHeight = 0;
+
+    constructor( TPose, autoGen=true ){
+        super( TPose );
+
+        if( autoGen ){
+            const bMap = new BoneMap( this.pose );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Limbs
+            this.setLeftArm( bMap.getBoneNames( [ 'upperarm_l', 'forearm_l', 'hand_l' ] ) );
+            this.setRightArm( bMap.getBoneNames( [ 'upperarm_r', 'forearm_r', 'hand_r' ] ) );
+            this.setLeftLeg( bMap.getBoneNames( [ 'thigh_l', 'shin_l', 'foot_l' ] ) );
+            this.setRightLeg( bMap.getBoneNames( [ 'thigh_r', 'shin_r', 'foot_r' ] ) );
+
+            this.setLeftFoot( bMap.getBoneNames( [ 'foot_l' ] ) );
+            this.setRightFoot( bMap.getBoneNames( [ 'foot_r' ] ) );
+
+            this.setLeftHand( bMap.getBoneNames( [ 'hand_l' ] ) );
+            this.setRightHand( bMap.getBoneNames( [ 'hand_r' ] ) );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Others
+            this.setSpine( bMap.getBoneNames( [ 'spine' ] ) );
+            this.setHead( bMap.getBoneNames( [ 'head' ] ) );
+            this.setHip( bMap.getBoneNames( [ 'hip' ] ) );
+        }
+    }
+    // #endregion
+
+    // #region SETUP
+    get leftArm(){ return this.sets[ this.names[ 'arm.l' ] ]; }
+    setLeftArm( bones ){
+        if( bones ) this.addSet( { name: 'arm.l', solver: 'limb', bones: bones, axes: BoneAxes.RBD } );
+        return this;
+    }
+
+    get rightArm(){ return this.sets[ this.names[ 'arm.r' ] ]; }
+    setRightArm( bones ){
+        if( bones ) this.addSet( { name: 'arm.r', solver: 'limb', bones: bones, axes: BoneAxes.LBU } );
+        return this;
+    }
+
+    get leftLeg(){ return this.sets[ this.names[ 'leg.l' ] ]; }
+    setLeftLeg( bones ){
+        if( bones ) this.addSet( { name: 'leg.l', solver: 'limb', bones: bones, axes: BoneAxes.DFR } );
+        return this;
+    }
+
+    get rightLeg(){ return this.sets[ this.names[ 'leg.r' ] ]; }
+    setRightLeg( bones ){
+        if( bones ) this.addSet( { name: 'leg.r', solver: 'limb', bones: bones, axes: BoneAxes.DFR } );
+        return this;
+    }
+
+    get spine(){ return this.sets[ this.names[ 'spine' ] ]; }
+    setSpine( bones ){
+        if( bones ) this.addSet( { name: 'spine', solver: 'limb', bones: bones, axes: BoneAxes.UFR } );
+        return this;
+    }
+
+    get head(){ return this.sets[ this.names[ 'head' ] ]; }
+    setHead( bones ){
+        if( bones ) this.addSet( { name: 'head', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get leftFoot(){ return this.sets[ this.names[ 'foot.l' ] ]; }
+    setLeftFoot( bones ){
+        if( bones ) this.addSet( { name: 'foot.l', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get rightFoot(){ return this.sets[ this.names[ 'foot.r' ] ]; }
+    setRightFoot( bones ){
+        if( bones ) this.addSet( { name: 'foot.r', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get leftHand(){ return this.sets[ this.names[ 'hand.l' ] ]; }
+    setLeftHand( bones ){
+        if( bones ) this.addSet( { name: 'hand.l', solver: 'limb', bones: bones, axes: BoneAxes.RBD } );
+        return this;
+    }
+
+    get rightHand(){ return this.sets[ this.names[ 'hand.r' ] ]; }
+    setRightHand( bones ){
+        if( bones ) this.addSet( { name: 'hand.r', solver: 'limb', bones: bones, axes: BoneAxes.LBU } );
+        return this;
+    }
+
+    get hip(){ return this.sets[ this.names[ 'hip' ] ]; }
+    setHip( bones ){
+        if( bones ){
+            this.addSet( { name: 'hip', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+
+            // Save Hip Height for use of scaling translations
+            const b = this.pose.bones[ this.hip.chain.firstLink.index ];
+            this.hipHeight = b.world.pos[ 1 ]; // Y
+        }
+        return this;
+    }
+    // #endregion
+}
+
+function customExecutor( rig, debug ){
+        // // Run IK solver for each chain set
+        // for( const s of this.sets ) s.updatePose( this.pose, debug );
+
+        // // Recompute worldspace pose
+        // this.pose.updateWorld();
+        // console.log( 'Exe', rig );
+}
+
+function applyIKPose( ikp, rig ){
+    // console.log( 'ApplyIKPose', ikp.legL );
+    // console.log( rig.leftLeg.target );
+
+    // let tar = rig.leftLeg.target;
+
+    // rig.leftLeg.target.setDirections( ikp.legL.swing, ikp.legL.twist, ikp.legL.lenScale );
+    // rig.leftLeg.updatePose( rig.pose, Debug );
+
+    ikHip( rig, rig.hip.target, rig.hip.chain, rig.pose, ikp.hip );
+
+    ikSpine( rig, rig.spine.target, rig.spine.chain, rig.pose, ikp.spine );
+
+    // TODO, dont really need to execute the solvers in this function, just copy over the target data
+    applyIKPoseLimb( rig.pose, rig.leftLeg, ikp.legL );
+    applyIKPoseLimb( rig.pose, rig.rightLeg, ikp.legR );
+    applyIKPoseLimb( rig.pose, rig.rightArm, ikp.armR );
+    applyIKPoseLimb( rig.pose, rig.leftArm, ikp.armL );
+
+    ikSwingTwist( rig.pose, rig.leftHand, ikp.handL );
+    ikSwingTwist( rig.pose, rig.rightHand, ikp.handR );
+
+    ikSwingTwist( rig.pose, rig.leftFoot, ikp.footL );
+    ikSwingTwist( rig.pose, rig.rightFoot, ikp.footR );
+    ikSwingTwist( rig.pose, rig.head, ikp.head );
+
+    // const v = new Vec3();
+    // Debug.pnt.add( tar.startPos, 0xff0000, 1 );
+    // Debug.pnt.add( tar.endPos, 0x00ff00, 1 );
+
+    // Debug.ln.add( tar.startPos, v.fromAdd( tar.startPos, tar.twist ), 0xff00ff );
+
+
+    // console.log( rig.leftLeg.target );
+    // console.log( ikp.legL.twist, tar.twist );
+}
+
+function applyIKPoseLimb( pose, ikSet, ikData ){
+    ikSet.target.setDirections( ikData.swing, ikData.twist, ikData.lenScale );
+    ikSet.updatePose( pose, Debug );
+}
+
+function ikHip( rig, target, chain, pose, ikp ){
+    // console.log( ikp );
+    // console.log( rig.hipHeight, ikp.bindHeight );
+
+    target.setDirections( ikp.swing, ikp.twist );
+    target.setDeltaMove( ikp.deltaPos, Math.abs( rig.hipHeight / ikp.bindHeight ) );
+
+    // console.log( target.deltaMove, ikp.deltaPos, Math.abs( rig.hipHeight / ikp.bindHeight ) );
+
+    // Resolve the target to the current pose data
+    target.resolveTarget( chain, pose );
+
+    // Align the the root bone to the target direction
+    lookSolver( target, chain, pose );
+    deltaMoveSolver( target, chain, pose );
+}
+
+function deltaMoveSolver( target, chain, pose ){
+    const lnk   = chain.firstLink;
+    const ptInv = new Transform().fromInvert( target.pworld ); // Invert Transform to Translate Position to Local Space
+    const cTran = new Transform().fromMul( target.pworld, lnk.bind );
+
+    // Debug.pnt.add( cTran.pos, 0xff00ff, 1, 1 );
+    cTran.pos.add( target.deltaMove );
+
+    // Debug.pnt.add( cTran.pos, 0xff00ff, 1, 0 );
+
+    // console.log( chain.firstLink.index );
+
+    ptInv.transformVec3( cTran.pos );                  // To Local Space
+    pose.setLocalPos( lnk.index, cTran.pos );
+
+    // ptInv.fromInvert( pt ); 
+
+
+    // const x = pose.getWorldTransform( lnk.index );
+
+    // Debug.pnt.add( cTran.pos, 0xffffff, 0.5, 0 );
+}
+
+
+function ikSwingTwist( pose, ikSet, ikData ){
+    ikSet.target.setDirections( ikData.swing, ikData.twist );
+    ikSet.target.resolveTarget( ikSet.chain, pose );
+    lookSolver( ikSet.target, ikSet.chain, pose );
+}
+
+function ikSpine( rig, target, chain, pose, ikp ){
+    target
+        .setDirections( ikp.startSwing, ikp.startTwist )
+        .setAltDirections( ikp.endSwing, ikp.endTwist );
+
+    // Resolve the target to the current pose data
+    target.resolveTarget( chain, pose );
+    
+    swingTwistChainSolver( target, chain, pose );
+}
+
+// resolve( chain: IKChain, pose: Pose, debug?:any ): void{
+//     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//     const hipPos : vec3 = [0,0,0];
+//     const pt            = new Transform();
+//     const ptInv         = new Transform();
+//     const lnk           = chain.first();
+
+//     // Get the Starting Transform
+//     if( lnk.pidx == -1 )    pt.copy( pose.offset );
+//     else                    pose.getWorldTransform( lnk.pidx, pt );
+
+//     ptInv.fromInvert( pt ); // Invert Transform to Translate Position to Local Space
+
+//     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//     // Which Position Type Are we handling?
+
+//     if( this.isAbs ){
+//         vec3.copy( hipPos, this.position );             // Set Absolute Position of where the hip must be
+//     }else{
+//         const ct = new Transform();
+//         ct.fromMul( pt, lnk.bind );                     // Get Bone's BindPose position in relation to this pose
+
+//         if( this.bindHeight == 0 ){
+//             vec3.add( hipPos, ct.pos, this.position );  // Add Offset Position
+//         }else{
+//             // Need to scale offset position in relation to the Hip Height of the Source
+//             vec3.scaleAndAdd( hipPos, ct.pos, this.position, Math.abs( ct.pos[ 1 ] / this.bindHeight ) );
+//         }
+//     }
+
+//     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//     ptInv.transformVec3( hipPos );                  // To Local Space
+//     pose.setLocalPos( lnk.idx, hipPos );
+
+//     this._swingTwist.resolve( chain, pose, debug ); // Apply SwingTwist Rotation
+// }
+
+// #endregion
+
+// #region COMPUTE IK DATA
+class IKBipedPose {
+    hip     = { swing:new Vec3(), twist:new Vec3(), deltaPos:new Vec3(), bindHeight:0 };
+    spine   = { startSwing:new Vec3(), startTwist:new Vec3(), endSwing:new Vec3(), endTwist:new Vec3() };
+    head    = { swing:new Vec3(), twist:new Vec3() };
+    armR    = { swing:new Vec3(), twist:new Vec3(), lenScale:0 };
+    armL    = { swing:new Vec3(), twist:new Vec3(), lenScale:0 };
+    legR    = { swing:new Vec3(), twist:new Vec3(), lenScale:0 };
+    legL    = { swing:new Vec3(), twist:new Vec3(), lenScale:0 };
+    footR   = { swing:new Vec3(), twist:new Vec3() };
+    footL   = { swing:new Vec3(), twist:new Vec3() };
+    handR   = { swing:new Vec3(), twist:new Vec3() };
+    handL   = { swing:new Vec3(), twist:new Vec3() };
+    constructor(){}
+}
+
+function computeIKBipedPose( pose, rig, ikp ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Compute Limbs
+    computeIkLimbData( pose, rig.leftArm.chain, ikp.armL );
+    computeIkLimbData( pose, rig.rightArm.chain, ikp.armR );
+    computeIkLimbData( pose, rig.leftLeg.chain, ikp.legL );
+    computeIkLimbData( pose, rig.rightLeg.chain, ikp.legR );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Other
+    computeIkSpineData( pose, rig.spine.chain, ikp.spine );
+    computeIKSwingTwist( pose, rig.head.chain, ikp.head );
+
+    computeIKSwingTwist( pose, rig.leftFoot.chain, ikp.footL );
+    computeIKSwingTwist( pose, rig.rightFoot.chain, ikp.footR );
+
+    computeIKSwingTwist( pose, rig.leftHand.chain, ikp.handL );
+    computeIKSwingTwist( pose, rig.rightHand.chain, ikp.handR );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // HIP - ROOT
+    computeIKSwingTwist( pose, rig.hip.chain, ikp.hip );
+    computeIKDeltaPos( rig, pose, rig.hip.chain, ikp.hip );
+}
+
+/** Data from Limb Solver */
+function computeIkLimbData( pose, chain, out ){
+    const bones     = pose.bones;
+    const ikSwing   = out.swing; //new Vec3();
+    const ikTwist   = out.twist; //new Vec3();
+    const v         = new Vec3();
+    let fLnk        = chain.firstLink;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Get Bone ends of the chain
+    const a = bones[ fLnk.index ];
+    const b = bones[ chain.lastLink.index ];
+
+    // Compute Swing Direction & Effector Distance Scale
+    ikSwing.fromSub( b.world.pos, a.world.pos );
+    out.lenScale = ikSwing.len / chain.len;
+    ikSwing.norm();
+
+    // Compute Orthogonal Twist Direction
+    ikTwist.fromQuat( a.world.rot, fLnk.axes.twist );   // Get Twist dir of root bone
+    v.fromCross( ikTwist, ikSwing );                    // Get orthogonal Direction...
+    ikTwist.fromCross( ikSwing, v ).norm();             // To align to Swing Dir
+}
+
+/** Only useful for spine data utilizing two axis rotation */
+function computeIkSpineData( pose, chain, out ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Start Axes
+    let lnk = chain.firstLink;
+    let b   = pose.bones[ lnk.index ];
+    out.startSwing.fromQuat( b.world.rot, lnk.axes.swing ).norm();
+    out.startTwist.fromQuat( b.world.rot, lnk.axes.twist ).norm();
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // End Axes
+    lnk = chain.lastLink;
+    b   = pose.bones[ lnk.index ];
+    out.endSwing.fromQuat( b.world.rot, lnk.axes.swing ).norm();
+    out.endTwist.fromQuat( b.world.rot, lnk.axes.twist ).norm();
+}
+
+/** Simple Axis Rotation : Head, Hips, Hands, Feet */
+function computeIKSwingTwist( pose, chain, out ){
+    let lnk = chain.firstLink;
+    let a   = pose.bones[ lnk.index ];
+    out.swing.fromQuat( a.world.rot, lnk.axes.swing ).norm();
+    out.twist.fromQuat( a.world.rot, lnk.axes.twist ).norm();
+}
+
+/** Used for HIP / ROOT Delta Translation */
+function computeIKDeltaPos( rig, pose, chain, out ){
+    const lnk   = chain.firstLink;
+    const b     = pose.bones[ lnk.index ];      // Get Current World Transform
+    const t     = pose                          
+        .getWorldTransform( lnk.pindex )        // Parent's current World Transform
+        .mul( lnk.bind );                       // Add Bone's localspace bind pose to it
+
+    // Diff between current pose & where bone would be if not posed
+    out.deltaPos.fromSub( b.world.pos, t.pos );
+
+    // Save skeleton's hip height as a scalar for hip translations
+    out.bindHeight = rig.hipHeight;
+}
+// #endregion
+
+// #region DEBUG IK DATA
+function debugIKBipedPose( ikp, rig, pose ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Render Limbs
+    debugIKLimb( rig.leftArm.chain, pose, ikp.armL );
+    debugIKLimb( rig.rightArm.chain, pose, ikp.armR );
+    debugIKLimb( rig.leftLeg.chain, pose, ikp.legL );
+    debugIKLimb( rig.rightLeg.chain, pose, ikp.legR );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Other
+    debugIKEnds( rig.spine.chain, pose, ikp.spine );
+    debugIKSwingTwist( rig.head.chain, pose, ikp.head, true );
+
+    debugIKSwingTwist( rig.leftFoot.chain, pose, ikp.footL );
+    debugIKSwingTwist( rig.rightFoot.chain, pose, ikp.footR );
+
+    debugIKSwingTwist( rig.leftHand.chain, pose, ikp.handL );
+    debugIKSwingTwist( rig.rightHand.chain, pose, ikp.handR );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // HIP - ROOT
+    debugIKSwingTwist( rig.hip.chain, pose, ikp.hip, true );
+    debugIKDeltaPos( rig.hip.chain, pose, ikp.hip )
+}
+
+function debugIKLimb( chain, pose, ikp ){
+    const aCol  = 0x00ffff;
+    const bCol  = 0x00ff00;
+    const v     = new Vec3();
+    const a     = pose.bones[ chain.firstLink.index ];
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Render End Points
+    Debug.pnt.add( a.world.pos, aCol, 2, 7 );
+    v.fromScaleThenAdd( ikp.lenScale * chain.len, ikp.swing, a.world.pos );
+    Debug.pnt.add( v, bCol, 2, 7 );
+    Debug.ln.add( a.world.pos, v, aCol, bCol, true );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Draw Pole Direction ( Twist )
+    v.fromScaleThenAdd( 0.2, ikp.twist, a.world.pos );
+    Debug.ln.add( a.world.pos, v, aCol );
+    Debug.pnt.add( v, aCol, 1, 0 );
+}
+
+function debugIKEnds( chain, pose, ikp ){
+    const aCol  = 0x00ffff;
+    const bCol  = 0x00ff00;
+    const scl   = 0.1;
+    const va    = new Vec3();
+    const vb    = new Vec3();
+
+    const aLnk  = chain.firstLink;
+    const bLnk  = chain.lastLink;
+
+    const a     = pose.bones[ aLnk.index ];
+    const b     = pose.bones[ bLnk.index ];
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // First Link
+    va.fromQuat( a.world.rot, aLnk.axes.swing ).norm().scale( scl ).add( a.world.pos );
+    vb.fromQuat( a.world.rot, aLnk.axes.twist ).norm().scale( scl ).add( a.world.pos );
+    Debug.pnt.add( a.world.pos, aCol, 2, 7 );
+    Debug.ln.add( a.world.pos, vb, aCol );
+    Debug.ln.add( a.world.pos, va, bCol );
+    Debug.pnt.add( vb, aCol, 1, 0 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Last Link
+    va.fromQuat( b.world.rot, bLnk.axes.swing ).norm().scale( scl ).add( b.world.pos );
+    vb.fromQuat( b.world.rot, bLnk.axes.twist ).norm().scale( scl ).add( b.world.pos );
+    Debug.pnt.add( b.world.pos, aCol, 2, 7 );
+    Debug.ln.add( b.world.pos, vb, aCol );
+    Debug.ln.add( b.world.pos, va, bCol );
+    Debug.pnt.add( vb, aCol, 1, 0 );
+}
+
+function debugIKSwingTwist( chain, pose, ikp, showPose=false ){
+    const aCol  = 0x00ffff;
+    const bCol  = 0x00ff00;
+    const scl   = 0.1;
+    const va    = new Vec3();
+    const vb    = new Vec3();
+
+    const aLnk  = chain.firstLink;
+    const a     = pose.bones[ aLnk.index ];
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    va.fromQuat( a.world.rot, aLnk.axes.swing ).norm().scale( scl ).add( a.world.pos );
+    vb.fromQuat( a.world.rot, aLnk.axes.twist ).norm().scale( scl ).add( a.world.pos );
+    if( showPose ) Debug.pnt.add( a.world.pos, aCol, 2, 7 );
+    Debug.ln.add( a.world.pos, vb, aCol );
+    Debug.ln.add( a.world.pos, va, bCol );
+    Debug.pnt.add( vb, aCol, 1, 0 );
+}
+
+function debugIKDeltaPos( chain, pose, ikp ){
+    const lnk   = chain.firstLink;
+    const b     = pose.bones[ lnk.index ];      // Get Current World Transform
+    const v     = new Vec3();
+    const t     = pose                          
+        .getWorldTransform( lnk.pindex )        // Parent's current World Transform
+        .mul( lnk.bind );                       // Add Bone's localspace bind pose to it
+
+    v.fromAdd( t.pos, ikp.deltaPos );           // Bind Pose + IK Offset
+
+    Debug.pnt.add( t.pos, 0xffff00, 1, 1 );
+    Debug.ln.add( t.pos, v, 0xffff00 ); 
+}
+// #endregion
+
+</script></body></html>

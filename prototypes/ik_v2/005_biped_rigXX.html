@@ -1,0 +1,203 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import useTransformMultiControl     from '../_lib/useTransformMultiControl.js';
+import Util                         from '../_lib/misc/Util.js';
+import GltfUtil, { Gltf2 }          from '../_lib/misc/GltfUtil.js';
+import MatrixSkinMaterial           from '../_lib/customSkinning/MatrixSkinMaterial.js';
+
+import { 
+    Armature, TranMatrixSkin,
+    Quat, Vec3, Transform, BoneMap,
+} from '../../src/index';
+
+import {
+    IKRig, BoneAxes, IKTarget, IKChain
+} from '../../src/kinematics2/index';
+// #endregion
+
+// #region MAIN
+let Debug;
+let App = useDarkScene( useThreeWebGL2() );
+let Ref = {
+    gizmo : useTransformMultiControl( App, 2 ),//.useAxes(),
+    tarPos : [0,0.7,0.5],
+    polPos : [0,0.7,-1],
+};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 20, 20, 3, [ 0, 0.8, 0 ] );
+    Debug = await useVisualDebug( App );
+    // Ref.gizmo.setPos( 0, Ref.tarPos );
+    // Ref.gizmo.setPos( 1, Ref.polPos );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Load Character
+    const gltf = await Gltf2.fetch( '/prototypes/_res/models/nabba/nabba.gltf' );
+    const arm  = GltfUtil.parseArmature( gltf, false, 0.05 );
+    arm.useSkin( TranMatrixSkin );
+    Ref.arm = arm;
+
+    const geo  = GltfUtil.loadGeoBuffers( gltf )[0];
+    const mat  = MatrixSkinMaterial( 'gray', arm.skin );
+    const mesh = new THREE.Mesh( geo, mat );
+
+    App.scene.add( mesh );
+    // Util.debugBones( arm.poses.bind.bones, Debug, 0.05, 1, false );
+    // arm.skin.updateFromPose( arm.bindPose );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup Rig
+    const rig = new IKBipedRig( arm.bindPose ); // Must be a TPose !!!
+
+
+    rig.getSet( 'arm.l' ).chain.debug( Debug, rig.pose );
+    rig.getSet( 'arm.r' ).chain.debug( Debug, rig.pose );
+    rig.getSet( 'leg.l' ).chain.debug( Debug, rig.pose );
+    rig.getSet( 'leg.r' ).chain.debug( Debug, rig.pose );
+    // rig.getSet( 'spine' ).chain.debug( Debug, rig.pose );
+
+    Ref.rig = rig;
+
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //App.createRenderLoop( onPreRender ).start();
+    App.renderLoop();
+});
+
+Ref.gizmo.onMove = (i, p)=>{
+
+    // switch( i ){
+    //     case 0: Ref.tarPos = p; break;
+    //     case 1: Ref.polPos = p; break;
+    // }
+
+    // // Set Targets & Run IK Solvers
+    // Ref.rig
+    //     .setTargetPositions( 'arm.l', Ref.tarPos, Ref.polPos )
+    //     .runSolvers();
+
+    // // Apply pose to skinned mesh
+    // Ref.arm.skin.updateFromPose( Ref.rig.pose );
+
+    // Debug.reset();
+    // Util.debugBones( Ref.rig.pose.bones, Debug, 0.05, 1, false );
+
+};
+
+function onPreRender( dt, et ){}
+// #endregion
+
+// #region IK RIG
+class IKBipedRig extends IKRig {
+    // #region MAIN
+    hipHeight = 0;
+    constructor( TPose, autoGen=true ){
+        super( TPose );
+
+        if( autoGen ){
+            const bMap = new BoneMap( this.pose );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Limbs
+            this.setLeftArm( bMap.getBoneNames( [ 'upperarm_l', 'forearm_l', 'hand_l' ] ) );
+            this.setRightArm( bMap.getBoneNames( [ 'upperarm_r', 'forearm_r', 'hand_r' ] ) );
+            this.setLeftLeg( bMap.getBoneNames( [ 'thigh_l', 'shin_l', 'foot_l' ] ) );
+            this.setRightLeg( bMap.getBoneNames( [ 'thigh_r', 'shin_r', 'foot_r' ] ) );
+
+            this.setLeftFoot( bMap.getBoneNames( [ 'foot_l' ] ) );
+            this.setRightFoot( bMap.getBoneNames( [ 'foot_r' ] ) );
+
+            this.setLeftHand( bMap.getBoneNames( [ 'hand_l' ] ) );
+            this.setRightHand( bMap.getBoneNames( [ 'hand_r' ] ) );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Others
+            this.setSpine( bMap.getBoneNames( [ 'spine' ] ) );
+            this.setHead( bMap.getBoneNames( [ 'head' ] ) );
+            this.setHip( bMap.getBoneNames( [ 'hip' ] ) );
+        }
+    }
+    // #endregion
+
+    // #region SETUP
+    get leftArm(){ return this.sets[ this.names[ 'arm.l' ] ]; }
+    setLeftArm( bones ){
+        if( bones ) this.addSet( { name: 'arm.l', solver: 'limb', bones: bones, axes: BoneAxes.RBD } );
+        return this;
+    }
+
+    get rightArm(){ return this.sets[ this.names[ 'arm.r' ] ]; }
+    setRightArm( bones ){
+        if( bones ) this.addSet( { name: 'arm.r', solver: 'limb', bones: bones, axes: BoneAxes.LBU } );
+        return this;
+    }
+
+    get leftLeg(){ return this.sets[ this.names[ 'leg.l' ] ]; }
+    setLeftLeg( bones ){
+        if( bones ) this.addSet( { name: 'leg.l', solver: 'limb', bones: bones, axes: BoneAxes.DFR } );
+        return this;
+    }
+
+    get rightLeg(){ return this.sets[ this.names[ 'leg.r' ] ]; }
+    setRightLeg( bones ){
+        if( bones ) this.addSet( { name: 'leg.r', solver: 'limb', bones: bones, axes: BoneAxes.DFR } );
+        return this;
+    }
+
+    get spine(){ return this.sets[ this.names[ 'spine' ] ]; }
+    setSpine( bones ){
+        if( bones ) this.addSet( { name: 'spine', solver: 'limb', bones: bones, axes: BoneAxes.UFR } );
+        return this;
+    }
+
+    get head(){ return this.sets[ this.names[ 'head' ] ]; }
+    setHead( bones ){
+        if( bones ) this.addSet( { name: 'head', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get leftFoot(){ return this.sets[ this.names[ 'foot.l' ] ]; }
+    setLeftFoot( bones ){
+        if( bones ) this.addSet( { name: 'foot.l', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get rightFoot(){ return this.sets[ this.names[ 'foot.r' ] ]; }
+    setRightFoot( bones ){
+        if( bones ) this.addSet( { name: 'foot.r', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+        return this;
+    }
+
+    get leftHand(){ return this.sets[ this.names[ 'hand.l' ] ]; }
+    setLeftHand( bones ){
+        if( bones ) this.addSet( { name: 'hand.l', solver: 'limb', bones: bones, axes: BoneAxes.RBD } );
+        return this;
+    }
+
+    get rightHand(){ return this.sets[ this.names[ 'hand.r' ] ]; }
+    setRightHand( bones ){
+        if( bones ) this.addSet( { name: 'hand.r', solver: 'limb', bones: bones, axes: BoneAxes.LBU } );
+        return this;
+    }
+
+    get hip(){ return this.sets[ this.names[ 'hip' ] ]; }
+    setHip( bones ){
+        if( bones ){
+            this.addSet( { name: 'hip', solver: 'limb', bones: bones, axes: BoneAxes.FUR } );
+
+            // Save Hip Height for use of scaling translations
+            const b = this.pose.bones[ this.hip.chain.firstLink.index ];
+            this.hipHeight = b.world.pos[ 1 ]; // Y
+        }
+        return this;
+    }
+    // #endregion
+}
+// #endregion
+
+</script></body></html>

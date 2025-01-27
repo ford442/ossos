@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+//#region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import Util                 from '../_lib/misc/Util.js';
+import { vec3, quat }       from 'gl-matrix';
+import Gltf2                from '../_lib/gltf2Parser.es.js';
+
+import { Vec3 }    from '../../src/index.ts';
+//#endregion
+
+//#region MAIN
+const App = useDarkScene( useThreeWebGL2() );
+const Ref = {};
+let Debug;
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 0, 20, 1, [ 0, 0.2, 0 ] );
+    Debug = await useVisualDebug( App );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Skinned Mesh from GLTF Model
+    const gltf = await Gltf2.fetch( '/prototypes/_res/models/spring_arm.gltf' );
+
+    // const prefab = new SpringPrefab( gltf );
+    // App.scene.add( prefab.root );
+    // Ref.prefab = prefab;
+
+    const spr = gltf.getMesh( 'SpringMesh' );
+
+    // console.log( spr.primitives[0].position.data );
+
+    let v   = new Vec3();
+    let buf = spr.primitives[0].position.data;
+
+    let ii=0;
+    for( let i=0; i < buf.length; i+= 3 ){
+        v.fromBuf( buf, i );
+        Debug.pnt.add( v, 0x00ff00, 0.1 );
+
+        if( ii >= 6*6-1 ) break;
+        ii++
+    }
+
+
+
+    // const char = gltfThreeSkinnedMesh( gltf, true );
+    // char.mesh.position.z = -1.5;
+    // App.scene.add( char.mesh, char.boneView );
+
+    // console.log( gltf.json.meshes );
+
+    // App.scene.add( gltfMesh( gltf, 'BaseBottom' )  );
+    // App.scene.add( gltfMesh( gltf, 'Rod' )  );
+    // App.scene.add( gltfMesh( gltf, 'BaseTop' )  );
+    App.scene.add( gltfMesh( gltf, 'SpringMesh' )  );
+    // App.scene.add( gltfMesh( gltf, 'EyelidDn' )  );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+});
+
+function onPreRender( dt, et ){
+    // Ref.prefab.update( et );
+}
+
+//#endregion
+
+function gltfMesh( gltf, fName, pos=[0,0,0] ){
+    const gMesh = gltf.getMesh( fName );
+    const gPrim = gMesh.primitives[ 0 ];
+    const bGeo  = Util.geoBuffer(
+        gPrim.position.data,
+        gPrim.indices.data, 
+        gPrim.normal.data, 
+        // gPrim.texcoord_0.data, 
+        // gPrim.joints_0.data, 
+        // gPrim.weights_0.data, 
+        // gPrim.weights_0.componentLen,
+    );
+    
+    const mesh = new THREE.Mesh( bGeo, new THREE.MeshPhongMaterial() );
+    mesh.position.fromArray( pos );
+    return mesh;
+}   
+
+
+class SpringPrefab{
+    root   = new THREE.Group();
+    bBase  = null;
+    tBase  = null;
+    rod    = null;
+    spring = null;
+
+    constructor( gltf ){
+        this.root.add(
+            ( this.bBase    = gltfMesh( gltf, 'BaseBottom' ) ),
+            ( this.rod      = gltfMesh( gltf, 'Rod', [0,0.04,0] ) ),
+            ( this.spring   = gltfMesh( gltf, 'SpringMesh', [0,0.04,0] ) ),
+            ( this.tBase    = gltfMesh( gltf, 'BaseTop', [0,0.46,0] ) ),
+        );
+    }
+
+    update( et ){
+        const t   = Math.sin( et * 2.0 ) * 0.5 + 0.5;
+        const scl = 1 - 0.7 * t;
+
+        this.spring.scale.set( 1, scl, 1 );
+        this.rod.scale.set( 1, scl, 1 );
+        this.tBase.position.y = 0.46 * scl;
+    }
+}
+
+</script></body></html>

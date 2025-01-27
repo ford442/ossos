@@ -1,0 +1,681 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../_lib/useThreeWebGL2.js';
+import useTransformMultiControl from '../_lib/useTransformMultiControl.js';
+import Util                     from '../_lib/misc/Util.js';
+
+import facedCube                from '../_lib/meshes/facedCube.js';
+
+import { 
+    Armature, Quat, Vec3, Transform,
+} from '../../src/index';
+
+import {
+    BoneAxes, IKTarget, IKChain, zCompose,
+    lookSolver, trapezoidSolver,
+} from '../../src/kinematics2/index';
+// #endregion
+
+// #region MAIN
+let Debug;
+let App = useDarkScene( useThreeWebGL2() );
+let Ref = {
+};
+
+    // IKLink {index: 10, pindex: 0, len: 1.9630490810141605, axes: BoneAxes, bind: Transform}
+    // IKLink {index: 11, pindex: 10, len: 1.7868094709271223, axes: BoneAxes, bind: Transform}
+    // IKLink {index: 12, pindex: 11, len: 0.7137383919268478, axes: BoneAxes, bind: Transform}
+    // IKLink {index: 13, pindex: 12, len: 0.1, axes: BoneAxes, bind: Transform}
+    // 4.4635969438681306
+
+/*
+Driver = Link that moves
+Follower = Link thats moves based on driver's motion
+
+Full rotation = Crank
+Limited Range = Rocker ( oscillate )
+
+Driver : Follower ( Different Types of Setups )
+Crank  : Crank  ( Both Full 360 )
+Crank  : Rocker ( One 360, other limited )
+Rocker : Rocker ( Both limited )
+
+Dead Point
+When the follower and coupler are a aligned, meaning both links form a straight line.
+The two can be aligned inward as well where the two overlap the same space.
+The driver is then locked as it can no longer rotate further. All the dead points
+will determine the range of the driver link.
+
+Change Point
+When all 3 links are aligned. When this happens it creates an unpredictable motion of the
+follower link. It can move upward or download based on the relative angle of the driver.
+
+https://www.youtube.com/watch?v=EdfyCduI-q8
+Conditions of a Triangle
+A = base ( adjacent ), B = opposite, C = Hypotenuse
+
+A + B > C
+abs( A - B ) < C
+can form     : abs( A-B ) < C < ( A + B )
+squashes tri : abs( A-B ) <= C <= ( A + B )
+
+Watch video for Length Conditions to tell existances of 4Bar Linkage
+
+
+
+Ground link (fixed link) length: a
+Crank link length: r
+Coupler link length: b
+Output link (follower) length: c
+
+
+https://www.youtube.com/watch?v=qsNODAUBbQE
+https://www.youtube.com/watch?v=W6q8b1dKhDA
+Grashof's Law
+l + s < p + q
+-- if s is side link, like crank or follower, will have a crank - rocker motion ( CR )
+-- if s is the base, will have crank-crank motion ( CC )
+-- if s is the coupler, will have rocker-rocker motion ( RR )
+
+l + s > p + q
+- Will be RR motion
+
+l + s = p + q
+-- Similar to <M
+-- Will have a few special cases
+---- If l & s are adjacent ( change point ), may have CR motion with rocker being kind of random dir after change point
+---- if l & s are opposites ( no change point ), will not change direction
+---- l = p | q && s = p | q, if the equal links are are opposites ( Parallelogram ), 
+    CC motion, dir can change on changepoint
+---- l = p | q && s = p | q, if equal links are adjacent
+------- l = base link : CR
+------- s = base link : CC
+
+
+## EXTRA
+
+Interesting 3 Bar Crank-Piston Motion
+https://www.youtube.com/watch?v=mCoCeuhi1v8
+
+*/
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Setup
+    App.sphericalLook( 0, 20, 4, [ 0, 0.6, 0 ] );
+    Debug = await useVisualDebug( App );
+
+    // Ref.gizmo.setPos( 0, Ref.tarPos );
+    // Ref.gizmo.setPos( 1, Ref.polPos );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.linkage = new FourBarLinkage();
+
+    // Ref.linkage.render();
+
+    // Ref.linkage.tick( 2.9, 5.6 ).render();
+    Ref.linkage.tick( 0.74, 5.6 ).render();
+
+    
+
+    // const apos = [-1,0.4,0];
+    // const dpos = [1,0.4,0];
+
+    // const bpos = new Vec3( 0.3, 0, 0 )
+    //     .rotate( 45*Math.PI/180, 'z' )
+    //     .add( apos );
+
+    // Debug.pnt.add( apos, 0x00ff00, 2 );
+    // Debug.pnt.add( dpos, 0x00ff00, 2 );
+    // Debug.pnt.add( bpos, 0x00ff00, 2 );
+
+    // Debug.ln.add( apos, dpos, 0x707070 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Build Skeleton
+    // const arm = createTestChain( [ [0,0.4,0], [0,0.3,0], [0,0.6,0], [0,0.3,0] ] );
+    // const arm = createTestChain( [ [0,0.4,0], [0,1.9630490810141605,0], [0,1.7868094709271223,0], [0,0.7137383919268478,0] ] );
+    // Util.debugBones( arm.poses.bind.bones, Debug, 0.2, 1, false );
+
+    // Ref.arm     = arm;
+    // Ref.pose    = arm.newPose();
+    // Ref.cubes   = createBoxChain( Ref.bCnt );
+
+    // Ref.chain   = new IKChain( Ref.pose.bones, BoneAxes.UFR );
+    // Ref.ikt     = new IKTarget();
+
+    // poseCubes( Ref.pose );
+    // runSolver();
+
+    // console.log( 'xxx', Ref.ikt.dist );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+    // App.renderLoop();
+});
+
+// Ref.gizmo.onRotate = (q)=>{ runSolver(); };
+// Ref.gizmo.onMove = (i, p)=>{
+//     switch( i ){
+//         case 0: Ref.tarPos = p; break;
+//         case 1: Ref.polPos = p; break;
+//     }
+
+//     runSolver();
+// };
+
+function onPreRender( dt, et ){
+
+    Ref.linkage.tick( et, dt ).render();
+
+}
+// #endregion
+
+
+function rotPos( rad, radius, v = new Vec3() ){
+    // const rad = deg * 180 / Math.PI;
+    v[0] = radius * Math.cos( rad );
+    v[1] = radius * Math.sin( rad );
+    return v;
+}
+
+function lawcosAngle( aLen, bLen, cLen ){
+    // Law of Cosines - SSS : cos(C) = (a^2 + b^2 - c^2) / 2ab
+    // The Angle between A and B with C being the opposite length of the angle.
+    const v = ( aLen**2 + bLen**2 - cLen**2 ) / ( 2 * aLen * bLen );
+    return Math.acos( Math.min( 1, Math.max( -1, v ) ) );  // Clamp to prevent NaN Errors
+}
+
+function lawcosLength( aLen, bLen, abRad ){
+    // Get the length of the opposite side
+    return  Math.sqrt( aLen**2 + bLen**2 - 2 * aLen * bLen * Math.cos( abRad ) );
+}
+
+function calcFollowerAngle( g, f, a, b, alpha, flipped=false ){
+    var l = cosLawLength(a, g, alpha);
+    var beta1 = cosLawAngle(g, l, a);
+    var beta2 = cosLawAngle(l, b, f);
+
+    if (Math.sin(alpha) > 0) {
+        if (flipped) {
+            return Math.PI - beta1 + beta2;
+        } else {
+            return Math.PI - beta1 - beta2;
+        }
+    } else {
+        if (flipped) {
+            return Math.PI + beta1 + beta2;
+        } else {
+            return Math.PI + beta1 - beta2;
+        }
+    }
+
+    // if (Math.sin(alpha) <= 0) {
+    //     if (flipped) {
+    //         return Math.PI - beta1 + beta2;
+    //     } else {
+    //         return Math.PI - beta1 - beta2;
+    //     }
+    // } else {
+    //     if (flipped) {
+    //         return Math.PI + beta1 + beta2;
+    //     } else {
+    //         return Math.PI + beta1 - beta2;
+    //     }
+    // }
+}
+
+function isGrashof(lengths) {
+  // Sort the lengths in ascending order
+  lengths.sort((a, b) => a - b);
+
+  const s = lengths[0]; // shortest
+  const l = lengths[3]; // longest
+  const p = lengths[1]; 
+  const q = lengths[2];
+
+  return (s + l) <= (p + q);
+}
+
+
+// https://dynref.engr.illinois.edu/aml.html
+// https://en.wikipedia.org/wiki/Four-bar_linkage
+class FourBarLinkage{
+    // #region MAIN
+    iLen = 0.9; // Input Length - Crank
+    oLen = 1.1; // Output length - Follower
+    cLen = 2.0; // Coupler Length
+    bLen = 0; // Ground / Base Length
+    aPos = new Vec3( -1, 0.4, 0 );
+    bPos = new Vec3(  1, 0.4, 0 );
+    iPos = new Vec3();
+    oPos = new Vec3();
+
+    ccRad = 0;
+
+    grashof = new Grashof();
+
+    constructor( i, c, o ){
+        if( o && c && i ) this.setLengths( i, c, o );
+        this.bLen = Vec3.dist( this.aPos, this.bPos );
+        // this.cLen = this.bLen; // Temp
+
+        console.log( 'Blen', this.bLen );
+        console.log( calculateCrankAngles( this.bLen, this.iLen, this.cLen, this.oLen ) );
+
+        this.grashof.update( this.bLen, this.iLen, this.cLen, this.oLen );
+    }
+    // #endregion
+
+    // #region SETTERS
+    setLengths( i, c, o ){
+        this.iLen = i;
+        this.cLen = c;
+        this.oLen = o;
+    }
+    // #endregion
+
+    tick( et, dt ){
+        const min = 3;
+
+        // console.log( 'isGrash', isGrashof( [this.bLen, this.iLen, this.cLen, this.oLen] ) );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Spin Crank
+
+        // this.ccRad += dt * Math.PI * 0.5;
+        let  cRad = ( et / min ) * Math.PI * 2;
+
+        // cRad = this.ccRad;
+
+        // cRad = this.crank;
+        rotPos( cRad, this.iLen, this.iPos );
+        this.iPos.fromAdd( this.aPos, this.iPos );
+
+        // if( cRad > Math.PI ) cRad = Math.abs( Math.PI * 2 - cRad );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // const fRad = calcFollowerAngle( this.bLen, this.cLen, this.iLen, this.oLen, cRad );
+        const fRad = solveFourBar( this.bLen, this.cLen, this.iLen, this.oLen, cRad, false );
+
+        // const fRad = computeBeta( this.bLen, this.iLen, this.cLen, this.oLen, cRad )
+        rotPos( fRad, this.oLen, this.oPos );
+        // const fRad = calculateBeta( this.bLen, this.iLen, this.cLen, this.oLen, cRad, false );
+        
+        // const fRad = calculateFollowerAngle( this.bLen, this.iLen, this.cLen, this.oLen, cRad );
+        // rotPos( Math.sin( cRad) >0 ? fRad[0] : fRad[1], this.oLen, this.oPos );
+
+        this.oPos.fromAdd( this.bPos, this.oPos );
+
+        // console.log( this.bLen, this.iLen, this.cLen, this.oLen, cRad, fRad,)
+        //  solveFourBar( this.bLen, this.cLen, this.iLen, this.oLen, cRad )
+
+        // console.log( Vec3.dist( this.iPos, this.oPos ), this.cLen );
+
+        // Debug.pnt.add( this.oPos, 0xff0000, 5 );
+        // Debug.pnt.add( this.iPos, 0xff0000, 5 );
+        
+        // console.log( Vec3.dist( this.iPos, this.aPos ), this.iLen );
+        // console.log( Vec3.dist( this.oPos, this.bPos ), this.oLen );
+
+        return this;
+    }
+
+    render(){
+        Debug.reset();
+        Debug.pnt.add( this.aPos, 0x00ff00, 2 );
+        Debug.pnt.add( this.bPos, 0x00ff00, 2 );
+        Debug.pnt.add( this.iPos, 0x00ffff, 2 );
+        Debug.pnt.add( this.oPos, 0x00ffff, 2 );
+
+        Debug.ln.add( this.aPos, this.bPos, 0x808080 );
+        Debug.ln.add( this.aPos, this.iPos, 0x00ff00, 0x00ffff );
+        Debug.ln.add( this.bPos, this.oPos, 0x00ff00, 0x00ffff );
+        Debug.ln.add( this.iPos, this.oPos, 0x00ffff );
+
+        return this;
+    }
+}
+
+
+
+const ClassificationMap = {
+    "+++": ["crank",    "rocker",   true,  0, 0, -1, -1],
+    "0++": ["crank",    "Ï€-rocker", true,  0, 2, -1, -1],
+    "-++": ["Ï€-rocker", "Ï€-rocker", false, 0, 2,  2,  3],
+    "+0+": ["crank",    "0-rocker", true,  0, 2, -1, -1],
+    "00+": ["crank",    "crank",    true,  0, 2, -1, -1],
+    "-0+": ["crank",    "crank",    true,  0, 2, -1, -1],
+    "+-+": ["Ï€-rocker", "0-rocker", false, 0, 2,  4,  5],
+    "0-+": ["crank",    "crank",    true,  0, 2, -1, -1],
+    "--+": ["crank",    "crank",    true,  0, 0, -1, -1],
+    "++0": ["crank",    "Ï€-rocker", true,  1, 2, -1, -1],
+    "0+0": ["crank",    "Ï€-rocker", true,  0, 1, -1, -1],
+    "-+0": ["Ï€-rocker", "Ï€-rocker", true,  1, 1,  2,  3],
+    "+00": ["crank",    "crank",    true,  0, 1, -1, -1],
+    "000": ["crank",    "crank",    true,  0, 1, -1, -1],
+    "-00": ["crank",    "crank",    true,  0, 1, -1, -1],
+    "+-0": ["Ï€-rocker", "crank",    true,  1, 1,  4,  5],
+    "0-0": ["crank",    "crank",    true,  0, 1, -1, -1],
+    "--0": ["crank",    "crank",    true,  1, 2, -1, -1],
+    "++-": ["0-rocker", "Ï€-rocker", false, 0, 2,  1,  0],
+    "0+-": ["0-rocker", "Ï€-rocker", true,  1, 1,  1,  0],
+    "-+-": ["rocker",   "rocker",   true,  0, 2,  2,  0],
+    "+0-": ["0-rocker", "crank",    true,  1, 1,  1,  0],
+    "00-": ["0-rocker", "crank",    true,  1, 1,  1,  0],
+    "-0-": ["0-rocker", "0-rocker", true,  1, 1,  1,  0],
+    "+--": ["rocker",   "crank",    true,  0, 2,  4,  0],
+    "0--": ["0-rocker", "crank",    true,  1, 1,  1,  0],
+    "---": ["0-rocker", "0-rocker", false, 0, 2,  1,  0]
+};
+
+class Grashof{
+    update( bLen, iLen, cLen, oLen ){
+        const T1    = bLen + cLen - iLen - oLen;
+        const T2    = oLen + bLen - iLen - cLen;
+        const T3    = oLen + cLen - iLen - bLen;
+        const key   = this.genKey( [T1,T2,T3] );
+
+        const dat   = ClassificationMap[ key ];
+
+        // console.log( key, dat );
+
+        var limitAngles = [
+            lawcosAngle(iLen, bLen, cLen + oLen),
+            -lawcosAngle(iLen, bLen, cLen + oLen),
+            lawcosAngle(iLen, bLen, cLen - oLen),
+            2 * Math.PI - lawcosAngle(iLen, bLen, cLen - oLen),
+            lawcosAngle(iLen, bLen, oLen - cLen),
+            2 * Math.PI - lawcosAngle( iLen, bLen, oLen - cLen )
+        ];
+
+        this.inputType = dat[0];
+        this.outputType = dat[1];
+        this.canFlip = (dat[4] > 0);
+        this.limited = (dat[5] >= 0);
+        this.Grashof = dat[2];
+        this.flipPhase = dat[3];
+        this.flipPeriod = dat[4];
+        this.alphaMin = (dat[5] >= 0 ? limitAngles[dat[5]] : 0);
+        this.alphaMax = (dat[6] >= 0 ? limitAngles[dat[6]] : 0);
+
+        if (this.Grashof) {
+            this.GrashofType = "Grashof";
+            this.GrashofInfo = "rotates fully";
+        } else {
+            this.GrashofType = "non-Grashof";
+            this.GrashofInfo = "reciprocates";
+        }
+
+        console.log( this );
+
+    }
+    
+    genKey( ary ){
+        let key = '';
+        for( let i of ary ){
+            key += i == 0 ? 0 
+                 : i > 0 ? '+' : '-';
+        }
+
+        return key;
+    }
+}
+
+
+/**
+ * Calculate minimum and maximum crank angles in a four-bar linkage
+ * @param {number} a - Length of ground link
+ * @param {number} r - Length of crank link
+ * @param {number} b - Length of coupler link
+ * @param {number} c - Length of follower link
+ * @returns {Object} Min and max angles, and whether full rotation is possible
+ */
+ function calculateCrankAngles(a, r, b, c) {
+    // Validate link lengths
+    if (a <= 0 || r <= 0 || b <= 0 || c <= 0) {
+        throw new Error('All link lengths must be positive');
+    }
+
+    // Sort links to check Grashof condition
+    // Need the Shortist Link, Longest Link then the other two, P & Q
+    const links = [a, r, b, c].sort((x, y) => x - y);
+    const [s, p, q, l] = links;
+
+    // Check Grashof condition for full rotation
+    const isGrashofCrank = (s + l <= p + q);
+
+
+    // Calculate angle limits using law of cosines
+    const calcAngle = (l1, l2, l3) => {
+        const cosTheta = (l1*l1 + l2*l2 - l3*l3) / (2 * l1 * l2);
+        return Math.acos(Math.max(Math.min(cosTheta, 1), -1)) * (180 / Math.PI);
+    };
+
+    // Minimum angle (most compressed configuration)
+    const minAngle = calcAngle(a, r, Math.abs(b - c));
+
+    // Maximum angle (most extended configuration)
+    const maxAngle = calcAngle(a, r, b + c);
+
+    return {
+        minAngle: Number(minAngle.toFixed(2)),
+        maxAngle: Number(maxAngle.toFixed(2)),
+        fullRotationPossible: isGrashofCrank
+    };
+ }
+
+
+/**
+ * Calculate follower link angle ranges in a four-bar linkage
+ * @param {number} a - Length of ground link
+ * @param {number} r - Length of crank link
+ * @param {number} b - Length of coupler link
+ * @param {number} c - Length of follower link
+ * @returns {Object} Detailed follower link angle information
+ */
+ function calculateFollowerAngles(a, r, b, c) {
+    // Validate link lengths
+    if (a <= 0 || r <= 0 || b <= 0 || c <= 0) {
+        throw new Error('All link lengths must be positive');
+    }
+
+    // Sort links to check Grashof condition
+    const links = [a, r, b, c].sort((x, y) => x - y);
+    const [s, p, q, l] = links;
+
+    // Check Grashof condition
+    const isGrashofCrank = (s + l <= p + q);
+
+    // Calculate inverse kinematics to determine angle ranges
+    const calculateInverseKinematics = () => {
+        // Compute possible configuration angles
+        const configurations = [];
+        
+        // Iterate through potential crank positions
+        for (let crankAngle = 0; crankAngle < 360; crankAngle += 5) {
+            const radCrankAngle = crankAngle * (Math.PI / 180);
+            
+            // Compute coupler and follower positions using complex trigonometry
+            // This involves solving the linkage closure equation
+            const x1 = a;
+            const y1 = 0;
+            const x2 = r * Math.cos(radCrankAngle);
+            const y2 = r * Math.sin(radCrankAngle);
+
+            // Compute follower link angle using complex geometric calculations
+            const followerAngle = Math.atan2(y2 - y1, x2 - x1);
+            configurations.push(followerAngle * (180 / Math.PI));
+        }
+
+        // Find min and max angles
+        return {
+            minAngle: Math.min(...configurations),
+            maxAngle: Math.max(...configurations),
+            uniquePositions: new Set(configurations).size
+        };
+    };
+
+    const followerResults = calculateInverseKinematics();
+
+    return {
+        minAngle: Number(followerResults.minAngle.toFixed(2)),
+        maxAngle: Number(followerResults.maxAngle.toFixed(2)),
+        fullRotationPossible: isGrashofCrank,
+        uniquePositions: followerResults.uniquePositions
+    };
+}
+
+
+/**
+ * Compute the angle of the follower link given link lengths and crank angle
+ * @param {number} a - Length of ground link
+ * @param {number} r - Length of crank link
+ * @param {number} b - Length of coupler link
+ * @param {number} c - Length of follower link
+ * @param {number} crankAngle - Angle of the crank (in degrees)
+ * @returns {Object} Follower link angle and possible configurations
+ */
+ function calculateFollowerAngle(a, r, b, c, crankAngle) {
+    // Convert crank angle to radians
+    const theta1 = crankAngle; // * (Math.PI / 180);
+    
+    // Crank tip coordinates
+    const x2 = a + r * Math.cos(theta1);
+    const y2 = r * Math.sin(theta1);
+    
+    // Use law of cosines to solve for possible configurations
+    const distanceBetweenPoints = Math.sqrt(x2 * x2 + y2 * y2);
+    
+    // Check if linkage configuration is possible
+    if (distanceBetweenPoints > (b + c)) {
+        throw new Error('Linkage configuration is not possible');
+    }
+    
+    // Compute cosine of angle between ground link and coupler
+    const cosTheta2 = (a * a + distanceBetweenPoints * distanceBetweenPoints - b * b) 
+                      / (2 * a * distanceBetweenPoints);
+    
+    // Compute sine of angle between ground link and coupler
+    const sinTheta2 = Math.sqrt(1 - cosTheta2 * cosTheta2);
+    
+    // Two possible configurations (due to mobility of linkage)
+    const config1Angle = Math.atan2(y2, x2) + Math.atan2(sinTheta2, cosTheta2);
+    const config2Angle = Math.atan2(y2, x2) - Math.atan2(sinTheta2, cosTheta2);
+    
+    // return {
+    //     config1Angle: config1Angle, // * (180 / Math.PI),
+    //     config2Angle: config2Angle, // * (180 / Math.PI)
+    // };
+
+    return [config1Angle,config2Angle];
+ }
+
+		/// <summary>
+		/// Determines whether the passed bar sizes are compatible with the existence of a four bar linkage
+		/// </summary>
+		/// <returns><c>true</c> if the four-bar linkage has bars whose size is acceptable; otherwise, <c>false</c>.</returns>
+		// public bool IsValid()
+		// {
+		// 	if (this.a > this.b + this.c + this.d) {
+		// 		return false;
+		// 	}
+		// 	if (this.b > this.a + this.c + this.d) {
+		// 		return false;
+		// 	}
+		// 	if (this.c > this.a + this.b + this.d) {
+		// 		return false;
+		// 	}
+		// 	if (this.d > this.a + this.b + this.c) {
+		// 		return false;
+		// 	}
+		// 	return true;
+		// }
+
+        /// <summary>
+		/// Size in arbitrary units of the left rotating bar.
+		/// </summary>
+		// public double a {
+		/// <summary>
+		/// Size in arbitrary units of the floating rotating bar.
+		/// </summary>
+		// public double b {
+		/// <summary>
+		/// Size in arbitrary units of the right rotating bar.
+		/// </summary>
+		// public double c {
+		/// <summary>
+		/// Size in arbitrary units of the ground fixed bar.
+		/// </summary>
+		// public double d {
+
+
+        /** Find the output angle beta for a four-bar linkage.
+
+//  @param {number} g Ground link length.
+//  @param {number} f Input link length.
+//  @param {number} a Output link length.
+//  @param {number} b Floating link length.
+//  @param {number} alpha Input angle.
+//  @param {bool} flipped Whether the output-floating triangle is flipped.
+//  @return {number} Output angle beta.
+// */
+function solveFourBar(g, f, a, b, alpha, flipped) {
+    var l = cosLawLength(a, g, alpha);
+    var beta1 = cosLawAngle(g, l, a);
+    var beta2 = cosLawAngle(l, b, f);
+    if (Math.sin(alpha) > 0) {
+        if (flipped) {
+            return Math.PI - beta1 + beta2;
+        } else {
+            return Math.PI - beta1 - beta2;
+        }
+    } else {
+        if (flipped) {
+            return Math.PI + beta1 + beta2;
+        } else {
+            return Math.PI + beta1 - beta2;
+        }
+    }
+};
+
+// /** Determine a triangle side length from two side lengths and the included angle.
+
+//     @param {number} a First adjacent side length.
+//     @param {number} b Second adjacent side length.
+//     @param {number} C Angle between sides a and b.
+//     @return {number} The side length c opposite to angle C.
+// */
+function cosLawLength(a, b, C) {
+    var c = Math.sqrt(a * a + b * b - 2 * a * b * Math.cos(C));
+    return c;
+}
+
+
+// function lawcos_sss( aLen: number, bLen: number, cLen: number ): number{
+//     // Law of Cosines - SSS : cos(C) = (a^2 + b^2 - c^2) / 2ab
+//     // The Angle between A and B with C being the opposite length of the angle.
+//     const v = ( aLen**2 + bLen**2 - cLen**2 ) / ( 2 * aLen * bLen );
+//     return Math.acos( Math.min( 1, Math.max( -1, v ) ) );  // Clamp to prevent NaN Errors
+// }
+
+
+/** Determine a triangle angle from the three side lengths.
+
+    @param {number} a First adjacent side length.
+    @param {number} b Second adjacent side length.
+    @param {number} c Opposite side length.
+    @return {number} The angle C opposite to side c.
+*/
+function cosLawAngle(a, b, c) {
+    if (a > 0 && b > 0) {
+        var C = Math.acos((a * a + b * b - c * c) / (2 * a * b));
+        return C;
+    } else {
+        return 0;
+    }
+}
+
+</script></body></html>
