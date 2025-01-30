@@ -678,4 +678,93 @@ function cosLawAngle(a, b, c) {
     }
 }
 
+
+
+
+
+/* DeepSeek
+function calculateInputLinkAngleRange(L1, L2, L3, L4) {
+    // Ensure the input lengths are valid
+    if (L1 <= 0 || L2 <= 0 || L3 <= 0 || L4 <= 0) {
+        throw new Error("All link lengths must be positive.");
+    }
+
+    // Check Grashof condition
+    const links = [L1, L2, L3, L4];
+    const maxLink = Math.max(...links);
+    const minLink = Math.min(...links);
+    const sumOtherLinks = links.reduce((sum, len) => sum + len, 0) - maxLink - minLink;
+
+    const isGrashof = maxLink + minLink <= sumOtherLinks;
+
+    if (isGrashof) {
+        // If Grashof, input link can rotate 360°
+        return { minAngle: 0, maxAngle: 360 };
+    } else {
+        // If non-Grashof, compute limiting angles
+        const cosThetaMin = (L1 ** 2 + L2 ** 2 - (L3 + L4) ** 2) / (2 * L1 * L2);
+        const cosThetaMax = (L1 ** 2 + L2 ** 2 - (L3 - L4) ** 2) / (2 * L1 * L2);
+
+        // Handle invalid cosine values (due to invalid linkage dimensions)
+        if (Math.abs(cosThetaMin) > 1 || Math.abs(cosThetaMax) > 1) {
+            throw new Error("Invalid linkage dimensions. No solution exists.");
+        }
+
+        const thetaMin = Math.acos(cosThetaMin) * (180 / Math.PI); // Convert to degrees
+        const thetaMax = Math.acos(cosThetaMax) * (180 / Math.PI); // Convert to degrees
+
+        return { minAngle: thetaMin, maxAngle: thetaMax };
+    }
+}
+
+// Example usage
+const L1 = 10; // Fixed link
+const L2 = 4;  // Input link (crank)
+const L3 = 8;  // Coupler link
+const L4 = 7;  // Output link (follower)
+
+try {
+    const angleRange = calculateInputLinkAngleRange(L1, L2, L3, L4);
+    console.log(`Minimum Angle: ${angleRange.minAngle}°`);
+    console.log(`Maximum Angle: ${angleRange.maxAngle}°`);
+} catch (error) {
+    console.error(error.message);
+}
+
+function calculateOutputLinkAngleRange(L1, L2, L3, L4) {
+    // Ensure the input lengths are valid
+    if (L1 <= 0 || L2 <= 0 || L3 <= 0 || L4 <= 0) {
+        throw new Error("All link lengths must be positive.");
+    }
+
+    // Compute the minimum and maximum output angles
+    const cosTheta4Min = (L1 ** 2 + L4 ** 2 - (L2 + L3) ** 2) / (2 * L1 * L4);
+    const cosTheta4Max = (L1 ** 2 + L4 ** 2 - (L2 - L3) ** 2) / (2 * L1 * L4);
+
+    // Handle invalid cosine values (due to invalid linkage dimensions)
+    if (Math.abs(cosTheta4Min) > 1 || Math.abs(cosTheta4Max) > 1) {
+        throw new Error("Invalid linkage dimensions. No solution exists.");
+    }
+
+    // Compute the angles in radians
+    const theta4Min = Math.acos(cosTheta4Min) * (180 / Math.PI); // Convert to degrees
+    const theta4Max = Math.acos(cosTheta4Max) * (180 / Math.PI); // Convert to degrees
+
+    return { minAngle: theta4Min, maxAngle: theta4Max };
+}
+
+// Example usage
+const L1 = 10; // Fixed link
+const L2 = 4;  // Input link (crank)
+const L3 = 8;  // Coupler link
+const L4 = 7;  // Output link (follower)
+
+try {
+    const angleRange = calculateOutputLinkAngleRange(L1, L2, L3, L4);
+    console.log(`Minimum Output Angle: ${angleRange.minAngle}°`);
+    console.log(`Maximum Output Angle: ${angleRange.maxAngle}°`);
+} catch (error) {
+    console.error(error.message);
+}
+*/
 </script></body></html>
