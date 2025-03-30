@@ -152,14 +152,14 @@ const reLeft    = new RegExp( '\\.l|left|_l', 'i' );
 const reRight   = new RegExp( '\\.r|right|_r', 'i' );
 
 const Parsers   = [
-    new BoneParse( 'thigh',     true, 'thigh|up.*leg', 'twist' ), //upleg | upperleg
-    new BoneParse( 'shin',      true, 'shin|leg|calf', 'up|twist' ),
+    new BoneParse( 'thigh',     true, 'thigh|up.*leg|hip(?!s)', 'twist' ), //upleg | upperleg, hip NOT hips
+    new BoneParse( 'shin',      true, 'shin|leg|calf|knee', 'up|twist' ),
     new BoneParse( 'foot',      true, 'foot' ),
     new BoneParse( 'toe',       true, 'toe' ),
-    new BoneParse( 'shoulder',  true, 'clavicle|shoulder' ),
-    new BoneParse( 'upperarm',  true, '(upper.*arm|arm)', 'fore|twist|lower' ),
-    new BoneParse( 'forearm',   true, 'forearm|arm', 'up|twist' ),
-    new BoneParse( 'hand',      true, 'hand', 'thumb|index|middle|ring|pinky' ),
+    new BoneParse( 'shoulder',  true, 'clavicle|shoulder|collar', 'shoulder_BIND' ),            // Exclude cartwheel's upperarm being shoulder_BIND
+    new BoneParse( 'upperarm',  true, '(upper.*arm|arm)|shoulder_BIND', 'fore|twist|lower' ),   // Cartwheel upper-arm name : shoulder_BIND
+    new BoneParse( 'forearm',   true, 'forearm|arm|elbow', 'up|twist' ),
+    new BoneParse( 'hand',      true, 'hand|wrist', 'thumb|index|middle|ring|pinky' ),
 
     new BoneParse( 'head',      false, 'head' ),
     new BoneParse( 'neck',      false, 'neck' ),
@@ -169,5 +169,20 @@ const Parsers   = [
     // eslint-disable-next-line no-useless-escape
     new BoneParse( 'spine',     false, 'spine.*\d*|chest', undefined, true ),
 ];
+
+// {"left_shoulder_BIND" => 8}
+// 9
+// : 
+// {"left_elbow_BIND" => 9}
+// {"left_hip_BIND" => 55}
+// 56
+// : 
+// {"left_knee_BIND" => 56}
+// 57
+// : 
+// {"left_ankle_BIND" => 57}
+// 58
+// : 
+// {"left_foot_BIND" => 58}
 
 // #endregion
