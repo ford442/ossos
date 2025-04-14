@@ -12,12 +12,14 @@ export default class Pose {
     offset               = new Transform(); // Additional offset transformation to apply to pose root
     linkedBone ?: Bone   = undefined;       // This skeleton extends another skeleton
     bones: Array< Bone > = new Array();     // Bone transformation heirarchy
+    srcPose ?: Pose      = undefined;       // Source pose that this pose came from
 
     constructor( arm ?: Armature ){
         if( arm ) this.arm = arm;
 
         // If bindpose exists, then lets do an instant clone of it
         if( arm?.poses?.bind ){
+            this.srcPose = arm.poses.bind;
             for( let i=0; i < arm.poses.bind.bones.length; i++ ){
                 this.bones.push( arm.poses.bind.bones[i].clone() );
             }
@@ -82,13 +84,28 @@ export default class Pose {
     }
 
     copy( pose: Pose ): this{
-        const bLen = this.bones.length;
+        const bLen      = this.bones.length;
+        this.srcPose    = pose;
 
         for( let i=0; i < bLen; i++ ){
             this.bones[ i ].local.copy( pose.bones[ i ].local );
             this.bones[ i ].world.copy( pose.bones[ i ].world );
         }
 
+        return this;
+    }
+
+    // Resets to source pose
+    reset(): this{
+        if( this.srcPose ){
+            const bLen = this.bones.length;
+            const p    = this.srcPose;
+
+            for( let i=0; i < bLen; i++ ){
+                this.bones[ i ].local.copy( p.bones[ i ].local );
+                this.bones[ i ].world.copy( p.bones[ i ].world );
+            }
+        }
         return this;
     }
     // #endregion

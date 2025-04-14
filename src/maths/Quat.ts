@@ -72,6 +72,18 @@ export default class Quat extends Array< number >{
         return this;
     }
     
+    fromNorm( a: ConstQuat ): this{
+        let len =  a[0]**2 + a[1]**2 + a[2]**2 + a[3]**2;
+        if( len > 0 ){
+            len = 1 / Math.sqrt( len );
+            this[ 0 ] = a[ 0 ] * len;
+            this[ 1 ] = a[ 1 ] * len;
+            this[ 2 ] = a[ 2 ] * len;
+            this[ 3 ] = a[ 3 ] * len;
+        }
+        return this;
+    }
+
     /** Axis must be normlized, Angle in Radians  */
     fromAxisAngle( axis: ConstVec3, rad: number ): this{ 
         const half = rad * 0.5;

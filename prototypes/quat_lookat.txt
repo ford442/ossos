@@ -1,0 +1,12 @@
+join[0].rotation = lookAt_Quat(target_vec, Vector3.right);
+join[1].Rotate(t[1]-join[1].localEulerAngles);
+join[0].Rotate(t[0]);
+function lookAt_Quat(v1:Vector3, v0:Vector3):Quaternion  // v0 -> v1
+{
+	v0 = v0.normalized;
+	v1 = v1.normalized;
+	var n = cross(v0, v1);
+	n = n.normalized;
+	var t:float = acos(dot(v0, v1))/2.0;	
+	return Quaternion(sin(t)*n.x, sin(t)*n.y, sin(t)*n.z, cos(t));
+}

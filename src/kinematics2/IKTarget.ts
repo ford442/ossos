@@ -22,6 +22,7 @@ export default class IKTarget {
 
     swing       = new Vec3();       // To Target Direction or end-start position
     twist       = new Vec3();       // To Pole Direction or Orth direction of swing
+    ortho       = new Vec3();       // Ortho direction between for swing & twist
     lenScale    = -1;               // How to scale the swing direction when computing IK Target Position
 
     altSwing   !: Vec3;             // Second set of SwingTwist Directions
@@ -123,10 +124,11 @@ export default class IKTarget {
         // TODO, Need to handle when Pole Matches Direction
         switch( this.pMode ){
             // Position
-            case 0: this.twist
-                .fromSub( this.polePos, this.startPos )
-                .alignTwist( this.swing, this.twist )
-                .norm();
+            case 0: 
+                // newUp = cross( fwd, cross( up, fwd ) );
+                this.twist.fromSub( this.polePos, this.startPos );      // General Twist Directuion
+                this.ortho.fromCross( this.twist, this.swing ).norm();  // Get orthogonal direction
+                this.twist.fromCross( this.swing, this.ortho ).norm();  // Relign twist its orthogonal to swing
                 break;
 
             // Direction
