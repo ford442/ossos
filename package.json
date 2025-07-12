@@ -21,15 +21,15 @@
         }
     },
 
-    "scripts"       : {
-        "dev"           : "vite",
-        "build"         : "vite build",
-        "build:types"   : "tsc --declaration --noEmit false --emitDeclarationOnly --strict false --outDir ./dist",
-        "build:site"    : "vite build --mode site",
-        "pack"          : "npm pack",
-        "preview-site"  : "vite preview",
-        "lint"          : "eslint . --ext .ts"
-    },
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "build:types": "tsc --declaration --noEmit false --emitDeclarationOnly --strict false --outDir ./dist",
+  "build:site": "vite build --mode site",
+  "pack": "npm pack",
+  "preview-site": "vite preview",
+  "lint": "eslint . --ext .ts"
+},
 
     "peerDependencies": {
         "gl-matrix"     : "^3.4.3"
